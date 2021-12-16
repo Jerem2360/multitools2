@@ -1,11 +1,8 @@
-import os
+import sys
 
-result = b""
-while True:
-    char = os.read(0, 1)
-    result += char
-    if char.endswith(b"\n"):
-        break
 
-print(result)
+try:
+    raise TypeError("Error")
+except TypeError:
+    print(sys.exc_info())
 
