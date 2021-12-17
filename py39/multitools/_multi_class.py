@@ -47,6 +47,7 @@ class _ClassData:
 
 class AbstractMethodDescriptor:
 
+    # noinspection PyUnresolvedReferences
     def __init__(self, func):
         self._func = func
         self._overridden = False

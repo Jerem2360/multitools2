@@ -1,5 +1,5 @@
 from typing import Generic as _Generic, TypeVar as _TypeVar, Any as _Any
-from ..functional import abstractmethod as _abstractmethod
+from py39.multi_tools.functional import abstractmethod as _abstractmethod
 from ctypes import c_void_p as _void_p, \
     c_char as _char
 

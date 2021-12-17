@@ -1,4 +1,4 @@
-from ..io import Stream as _Stream
+from py39.multi_tools.io import Stream as _Stream
 from ._data import Package as _Package, Address as _Address
 from ..errors import *
 import socket
