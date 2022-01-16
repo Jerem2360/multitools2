@@ -1,6 +1,5 @@
 from . import _external
 from ._external import Library
-import sys
 from . import _gl
 
 __all__ = [
@@ -43,7 +42,7 @@ def is_an_admin() -> bool:
     return is_admin() != 0
 
 
-def runas_admin(file: str, args: str, flags: int = 1) -> int:
+def runas_admin(file: str, *args: str, flags: int = 1) -> int:
     """
     Run a program as administrator, invoking the UAC (or User Account Control)
     to ask for permissions.
@@ -53,7 +52,7 @@ def runas_admin(file: str, args: str, flags: int = 1) -> int:
     """
     shell_execute = external("C:/Windows/System32/shell32.dll", "ShellExecuteW")
     shell_execute.restype = int
-    code = shell_execute(None, "runas", file, args, None, flags)
+    code = shell_execute(None, "runas", file, ' '.join(*args), None, flags)
     return code
 
 

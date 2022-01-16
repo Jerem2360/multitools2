@@ -5,6 +5,7 @@ from .._type_check import typecheck
 
 CData = type(getattr(_ctypes, "_SimpleCData"))
 CFuncPtr = _ctypes.CFuncPtr
+"""Function pointer"""
 # noinspection PyTypeChecker
 PyCFuncPtrType = type(_ctypes.CFuncPtr)
 """meta type for C function pointers"""
