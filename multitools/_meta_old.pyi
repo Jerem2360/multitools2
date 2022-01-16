@@ -34,8 +34,9 @@ class AbstractMethodDescriptor:
 
 
 class MultiMeta(type):
+    # noinspection PyMissingConstructor
     def __init__(cls, name: str, bases: tuple[type], dct: dict[str, Any]) -> None:
         cls.__data__: ClassData = ...
-
     def __repr__(self) -> str: ...
+    def __instancecheck__(cls, instance) -> bool: ...
 

@@ -20,7 +20,7 @@ class AbstractMethodDescriptor:
 
         # make sure the decorated function doesn't declare a body:
         if hasattr(function, "__code__"):
-            match function.__code__.co_code:
+            match (function.__code__.co_code):
                 case b"d\x01S\x00":  # binary code where there is documentation but function does nothing
                     pass
                 case b"d\x00S\x00":  # same, but no documentation
@@ -186,5 +186,12 @@ class MultiMeta(type):
         return f"<multitools class '{cls.__data__.name}'>"
 
     def __getitem__(cls, item):
+        if hasattr(cls, "__class_getitem__"):
+            return cls.__class_getitem__(item)
         return cls
+
+    def __instancecheck__(cls, instance):
+        if hasattr(cls, "__class_instancecheck__"):
+            return cls.__class_instancecheck__(instance)
+        return False
 
