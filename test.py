@@ -1,5 +1,9 @@
-import ctypes
+from multitools.external import DllImport, Str, Library
 
 
-print(ctypes.c_bool(False).value)
+@DllImport("C:/Windows/System32/msvcrt.dll")
+def printf(data: Str) -> None: ...
+
+
+printf("coucou")
 

@@ -8,6 +8,7 @@ def typecheck(target, expected_types=(object,), target_name=None, expected_type_
             if not isinstance(tp, type):
                 raise TypeError(f"'expected_types': expected type 'tuple[type]', got 'tuple[{type(tp).__name__}]' instead.")
             if isinstance(target, tp):
+
                 result = True
                 break
 
@@ -23,7 +24,7 @@ def typecheck(target, expected_types=(object,), target_name=None, expected_type_
         raise TypeError(f"'expected_type_name': expected type 'str', got '{type(expected_type_name).__name__}' instead.")
 
     if not (isinstance(check_func, type(None)) or callable(check_func)):
-        raise TypeError(f"'check_func': expected type 'Callable', got '{type(check_func).__name__}' instead.")
+        raise TypeError(f"'check_func': expected type 'Optional[Callable]', got '{type(check_func).__name__}' instead.")
 
     if len(expected_types) == 0:
         expected_types = (object,)

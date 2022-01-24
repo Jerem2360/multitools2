@@ -1,6 +1,8 @@
 import _ctypes
 from .._meta import *
 from .._type_check import typecheck
+import os
+from .._ref import *
 
 
 CData = type(getattr(_ctypes, "_SimpleCData"))
@@ -15,13 +17,20 @@ class Library(metaclass=MultiMeta):
     """
     Represents a loaded external library.
     """
-    def __init__(self, handle):
+    def __init__(self, handle, name=""):
         """
         Initialize a new already loaded library from it's integer handle.
         """
         typecheck(handle, (int,), target_name="handle")
+        typecheck(name, (str,), target_name='name')
         self._handle = handle
+        if name == "":
+            name = str(self._handle)
         self._freed = False
+        self._name = name
+
+    def __repr__(self):
+        return f"<memory handle '{hex(self._handle)}' at {hex(id(self))}>"
 
     @staticmethod
     def load(path, flags=0):
@@ -31,7 +40,9 @@ class Library(metaclass=MultiMeta):
         """
         typecheck(path, (str,), target_name="path")
         typecheck(flags, (int, bytes), target_name="flags")
-        return Library(_ctypes.LoadLibrary(path, flags))
+        if not os.path.exists(path):
+            raise FileNotFoundError(f'No file named "{path}" was found.')
+        return Library(_ctypes.LoadLibrary(path, flags), name=path)
 
     def getfunc(self, name_or_ordinal, flags=0):
         """
@@ -72,4 +83,6 @@ class Library(metaclass=MultiMeta):
         """
         _ctypes.FreeLibrary(self._handle)
         self._freed = True
+
+    name = reference('_name', "", writable=False)
 

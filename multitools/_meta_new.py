@@ -178,6 +178,7 @@ class MultiMeta(type):
                 old_init(self, *args, **kwargs)  # otherwise, execute __init__ as usual
 
             cls.__init__: Any = __init__
+            cls.__module__ = "multitools"
 
     def __repr__(cls):
         """
@@ -193,5 +194,10 @@ class MultiMeta(type):
     def __instancecheck__(cls, instance):
         if hasattr(cls, "__class_instancecheck__"):
             return cls.__class_instancecheck__(instance)
+        return False
+
+    def __subclasscheck__(cls, subclass):
+        if hasattr(cls, "__class_subclasscheck__"):
+            return cls.__class_subclasscheck__(subclass)
         return False
 

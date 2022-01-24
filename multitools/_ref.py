@@ -19,6 +19,7 @@ def reference(target_name, default, writable=True):
     try:
         class test(base):
             pass
+        test()
     except TypeError:
         # if not, we will inherit from plain object:
         base = object
@@ -27,7 +28,7 @@ def reference(target_name, default, writable=True):
 
     # noinspection PyShadowingNames
     class reference(base, metaclass=MultiMeta):
-        def __init__(self):
+        def __init__(self, *args, **kwargs):
             """
             Initialize a new reference object with given target and default return value
             """
@@ -47,12 +48,16 @@ def reference(target_name, default, writable=True):
                     return res
                 except AttributeError:
                     return self._default
+                except KeyError:
+                    return self._default
             try:
                 res = self._get_target(instance)
-                typecheck(res, (type(self._default),), target_name="default",
-                          expected_type_name=type(res).__name__)
+                # typecheck(res, (type(self._default),), target_name="default",
+                          # expected_type_name=type(res).__name__)
                 return res
             except AttributeError:
+                return self._default
+            except KeyError:
                 return self._default
 
         def _get_target(self, obj):
