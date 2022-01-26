@@ -5,7 +5,7 @@ from ._types import Float, Double
 from ._types import Bool
 from ._types import Str, Char, Bytes
 from ._types import Null as NULL_t
-from ._types import Ptr as Pointer
+from ._types import Ptr as Pointer, Array
 from .. import _decorator
 
 from types import FunctionType as _FuncType
@@ -27,6 +27,7 @@ __all__ = [
     "Char",
     "Bytes",
     "Pointer",
+    "Array",
     "ExternalFunction",
     "Library",
     "ctype",

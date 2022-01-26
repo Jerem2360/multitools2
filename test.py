@@ -1,9 +1,14 @@
-from multitools.external import DllImport, Str, Library
+import ctypes
+from multitools import external
 
 
-@DllImport("C:/Windows/System32/msvcrt.dll")
-def printf(data: Str) -> None: ...
+cint = ctypes.c_ulong(104)
+Cint = external.Long[False, 'big', False].__from_c__(cint)
 
+Iptr = external.Pointer[external.Long[False, 'big', False]].addressof(Cint)
 
-printf("coucou")
+print(Iptr, Iptr.value)
+
+content = Iptr.contents()
+print(content, content.value)
 

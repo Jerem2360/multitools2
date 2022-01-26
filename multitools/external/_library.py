@@ -32,6 +32,7 @@ class ExternalFunction(metaclass=MultiMeta):
         self._argtypes = ()
         self.set_restype(restype)
         self.set_argtypes(argtypes)
+        self.__name__ = '<undefined>'
 
     @staticmethod
     def _manage_exception(e: OSError):
@@ -217,7 +218,10 @@ class Library(metaclass=MultiMeta):
         typecheck(flags, (int,), target_name='flags')
 
         funcptr = self._handle.getfunc(name_or_ordinal, flags=flags)
-        return ExternalFunction(funcptr, argtypes, restype)
+        ext_func = ExternalFunction(funcptr, argtypes, restype)
+        if isinstance(name_or_ordinal, str):
+            ext_func.__name__ = name_or_ordinal
+        return ext_func
 
     @staticmethod
     def load(library, flags=0):
