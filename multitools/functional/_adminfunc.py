@@ -1,5 +1,6 @@
 from .. import system
 from .._meta import *
+from ._simplefunc import SimpleFunction
 import pickle
 import sys
 import types
@@ -9,7 +10,7 @@ def needs_admin(func):
     return FuncNeedsAdmin(func.__code__, globals(), name=func.__name__)
 
 
-class FuncNeedsAdmin(types.FunctionType, metaclass=MultiMeta):
+class FuncNeedsAdmin(SimpleFunction, metaclass=MultiMeta):
     def __init__(self, code, globals_, name=None, argdefs=None, closure=None):
         self._true_code = pickle.dumps(code)
         self._true_gl = pickle.dumps(globals_)
@@ -18,7 +19,7 @@ class FuncNeedsAdmin(types.FunctionType, metaclass=MultiMeta):
                           f"code = pickle.loads({repr(self._true_code)});" \
                           f"gl = pickle.loads({repr(self._true_gl)})" \
                           f"function = types.FunctionType(code, globals, name={repr(name)}, argdefs={repr(argdefs)}, closure={repr(closure)});"
-        # noinspection PyArgumentList
+
         super().__init__(code, globals_, name=name, argdefs=argdefs, closure=closure)
 
     def __call__(self, *args, **kwargs):
