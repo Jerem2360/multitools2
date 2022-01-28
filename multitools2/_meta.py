@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from . import _misc, _hidden_builtins
+from . import _misc
 
 
 class instance:
@@ -10,7 +10,7 @@ class instance:
 class FieldWrapper(metaclass=_misc.SimpleMeta):
 
     __abstract__ = False
-    __static__ = True
+    __static__ = False
     is_function = False
 
     def __init__(self, value):
@@ -121,6 +121,7 @@ class MultiMeta(type):
             doc = None
 
         # the __dict__ attribute of the new class:
+        # noinspection PyArgumentList
         new_dict = {
             "#data": ClsData(arg1, abstract, list(dct['__fields__']), {}, {}),
             "__doc__": doc,
@@ -134,20 +135,18 @@ class MultiMeta(type):
         cls = super().__new__(mcs, arg1, bases, new_dict)
 
         # store attributes into class data instead of __dict__.
+        cls_data = type.__getattribute__(cls, "#data")
         for k, v in dct.items():
             if isinstance(v, FieldWrapper):
                 field = v
             else:
                 field = FieldWrapper(v)
 
-            if ('__fields__' in dct) and (k in dct['__fields__']):
-                field.__static__ = False
-            if field.__abstract__ and not abstract:
-                cls_data = type.__getattribute__(cls, "#data")
+            field.__static__ = bool(('__fields__' in dct) and (k in dct['__fields__']))
+            if field.__abstract__ and not cls_data.abstract:
                 cls_data.abstract = True
-                type.__setattr__(cls, "#data", cls_data)
-                abstract = True
             setattr(cls, k, field)
+        type.__setattr__(cls, "#data", cls_data)
 
         # store attributes coming from the base classes into a temporary buffer:
         bases_static = {}
@@ -192,14 +191,13 @@ class MultiMeta(type):
         # return the actual meta-instance:
         return cls
 
-    # noinspection PyDefaultArgument
+    # noinspection PyDefaultArgument,PyArgumentList
     def __init__(cls, *args, **kwargs):
         """
         Initialize a new class either from an existing one or from scratch.
         """
         if len(args) != 3:
             return
-        abstract = cls.__data__.abstract
         base = cls.__bases__[0]
 
         custom_init = cls.__data__.static_fields['__init__'].value if '__init__' in cls.__data__.static_fields else \
@@ -227,6 +225,7 @@ class MultiMeta(type):
         type.__init__(cls, *args, **kwargs)
 
         cls.__builtin_setattr__('__init__', true_init)
+        # noinspection PyTypeChecker
         cls.__init__ = true_init
 
         cls.__builtin_setattr__('__new__', true_new)
