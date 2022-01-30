@@ -61,6 +61,12 @@ class ClsData(metaclass=_misc.SimpleMeta):
     instance_fields: dict[str, FieldWrapper]
 
 
+def _type_hasattr(obj, name):
+    if isinstance(obj, MultiMeta):
+        return name in obj.__data__.static_fields
+    return hasattr(obj, name)
+
+
 # noinspection PyPropertyDefinition
 class MultiMeta(type):
     """
@@ -93,7 +99,7 @@ class MultiMeta(type):
         if not isinstance(abstract, bool):
             raise TypeError(f"'abstract': Expected type 'bool', got '{type(abstract).__name__}' instead.")
 
-        # creation from an exiting one:
+        # creation from an existing one:
         if isinstance(arg1, MultiMeta):
 
             # make sure 'bases' and 'dct' are not set:
@@ -120,6 +126,9 @@ class MultiMeta(type):
         except KeyError:
             doc = None
 
+        if '__fields__' not in dct:
+            dct['__fields__'] = []
+
         # the __dict__ attribute of the new class:
         # noinspection PyArgumentList
         new_dict = {
@@ -142,7 +151,7 @@ class MultiMeta(type):
             else:
                 field = FieldWrapper(v)
 
-            field.__static__ = bool(('__fields__' in dct) and (k in dct['__fields__']))
+            field.__static__ = not bool(('__fields__' in dct) and (k in dct['__fields__']))
             if field.__abstract__ and not cls_data.abstract:
                 cls_data.abstract = True
             setattr(cls, k, field)
@@ -167,9 +176,9 @@ class MultiMeta(type):
                 else:
                     field = FieldWrapper(sv)
                 if field.__abstract__ or (hasattr(sv, '__abstract__') and sv.__abstract__):
-                    ftype = "Static method" if field.is_function else "Static field"
+                    ftype = "Abstract method" if field.is_function else "Abstract field"
                     err = TypeError if field.is_function else AttributeError
-                    raise err(f"{ftype} missing override")
+                    raise err(f"{ftype} '{sk}' missing override")
 
         # and each of the instance attributes:
         for ik, iv in bases_instance.items():
@@ -200,19 +209,29 @@ class MultiMeta(type):
             return
         base = cls.__bases__[0]
 
+        def _init(self, *a, **kw):
+            if base is object:
+                base.__init__(self)
+            else:
+                base.__init__(self, *a, **kw)
+
+        # noinspection PyArgumentList
+        def _new(c, *a, **kw):
+            if base is object:
+                return base.__new__(c)
+            return base.__new__(c, *a, **kw)
+
         custom_init = cls.__data__.static_fields['__init__'].value if '__init__' in cls.__data__.static_fields else \
-            lambda self, *a, **kw: base.__init__(self, *a, **kw)
+            _init
         custom_new = cls.__data__.static_fields['__new__'].value if '__new__' in cls.__data__.static_fields else \
-            lambda c, *a, **kw: base.__new__(c)
+            _new
 
         def true_init(self, *a, **kw):
-            # print("init instance")
-            print("init", self, a, kw)
+            # print("init", self, a, kw)
             return custom_init(self, *a, **kw)
 
         def true_new(clas, *a, **kw):
-            # print("new instance")
-            print("new", clas, a, kw)
+            # print("new", clas, a, kw)
             field_defs = clas.__data__.field_defs
             self = custom_new(clas, *a, **kw)
             for field_name in field_defs:
@@ -235,9 +254,6 @@ class MultiMeta(type):
         """
         Implement cls.key = value
         """
-        # allow customization:
-        if hasattr(cls, '__class_setattr__'):
-            return cls.__class_setattr__(key, value)
 
         # make the FieldWrapper object & detect if it's static or not:
         is_instance_field = False

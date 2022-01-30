@@ -1,21 +1,20 @@
 from ._meta import *
 
 
-class Test(metaclass=MultiMeta):
+class TestParent(metaclass=MultiMeta):
     __fields__ = [
         "contents",
-        "shit",
     ]
 
-    contents = "coucou"
+    def __init__(self, data):
+        print(data)
 
-    def __new__(cls, *args, **kwargs):
-        print("new test")
-        return super().__new__(cls)
-
-    def __init__(self, shit="merde"):
-        self.shit = shit
+    def set_contents(self, value): ...
 
 
-#Test = MultiMeta(Test, abstract=True)
+# TestParent = MultiMeta(TestParent, abstract=True)
+
+
+class Test(TestParent, metaclass=MultiMeta):
+    pass
 

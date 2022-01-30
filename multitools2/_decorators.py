@@ -1,4 +1,4 @@
-from . import _meta, _hidden_builtins
+from .
 
 
 def abstract(obj):
