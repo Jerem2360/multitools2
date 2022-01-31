@@ -10,6 +10,7 @@ class FieldWrapper(metaclass=_misc.SimpleMeta):
     _classmethod = False
 
     def __init__(self, value):
+        self._value = value
         if isinstance(value, FieldWrapper):
             raise TypeError("Fields cannot contain 'FieldWrapper' objects.")
         if isinstance(value, classmethod):
@@ -19,8 +20,7 @@ class FieldWrapper(metaclass=_misc.SimpleMeta):
             self._value = value.__func__
             self._staticmethod = True
 
-        self._value = value
-        if callable(self._value):
+        if callable(value):
             self.is_function = True
 
     @property
