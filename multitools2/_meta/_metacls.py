@@ -92,9 +92,6 @@ class MultiMeta(type):
         mro = list(cls_data.mro)
         # print(cls, mro)
         mro.pop(0)
-        print(cls, mro)
-
-        print(hasattr(mro[0]))
 
         for entry in mro:
             try:
@@ -199,10 +196,13 @@ class MultiMeta(type):
 
                 for base in bases:
                     if isinstance(base, MultiMeta):
-                        static_fields = {**static_fields, **base.__data__.static_fields}
+                        print(type.__getattribute__(base, '__dict__'))
+                        print(base.__data__.instance_fields)
+                        # static_fields = {**static_fields, **base.__data__.static_fields}
                         instance_fields = {**instance_fields, **base.instance_fields}
 
                 # create the new namespace:
+                # noinspection PyTypeChecker
                 new_np = {
                     DATA: _data.ClsData(name, abstract, field_defs, static_fields, instance_fields, bases, False, ()),
                     '__doc__': doc,
@@ -242,7 +242,6 @@ class MultiMeta(type):
 
         def _init(self, *a, **kw):
             if base_init is object.__init__:
-                # print(f"{self}: base is {base_init}")
                 base_init(self)
             else:
                 base_init(self, *a, **kw)
@@ -250,7 +249,6 @@ class MultiMeta(type):
         # noinspection PyArgumentList
         def _new(c, *a, **kw):
             if base_new is object.__new__:
-                # print(f"{c}: base is {base_new}")
                 return base_new(c)
             return base_new(c, *a, **kw)
 
@@ -261,17 +259,10 @@ class MultiMeta(type):
         # print("creating", custom_init, custom_new)
         cls_data = type.__getattribute__(cls, DATA)
 
-        # todo
-
-        # custom_init = cls_data.static_fields['__init__'].value if '__init__' in cls_data.static_fields else base_init
-        # custom_new = cls_data.static_fields['__new__'].value if '__new__' in cls_data.static_fields else base_new
-
         def __init__(self, *initargs, **initkwargs):
-            # print("init", self, initargs, initkwargs, custom_init)
             custom_init(self, *initargs, **initkwargs)
 
         def __new__(_cls, *newargs, **newkwargs):
-            # print("new", _cls, newargs, newkwargs, custom_new)
 
             field_defs = _cls.__data__.field_defs
             self = custom_new(_cls, *newargs, **newkwargs)
@@ -283,13 +274,12 @@ class MultiMeta(type):
 
         type.__init__(cls, *args, **kwargs)
 
-        print(f"initializing class {cls.__qualname__}")
         __init__.__qualname__ = f"{cls.__qualname__}.__init__"
         __new__.__qualname__ = f"{cls.__qualname__}.__new__"
 
         cls_data = type.__getattribute__(cls, DATA)
-        cls_data.static_fields['__init__'] = _field.FieldWrapper(__init__)
-        cls_data.static_fields['__new__'] = _field.FieldWrapper(__new__)
+        # cls_data.static_fields['__init__'] = _field.FieldWrapper(__init__)
+        # cls_data.static_fields['__new__'] = _field.FieldWrapper(__new__)
         type.__setattr__(cls, DATA, cls_data)
 
         # noinspection PyTypeChecker
@@ -300,6 +290,7 @@ class MultiMeta(type):
         """
         Implement getattr(cls, name)
         """
+        print("looking for", item)
         if item in DICT_VALID:
             # attribute can touch __dict__ so use builtin behaviour:
             return type.__getattribute__(cls, item)
@@ -361,10 +352,11 @@ class MultiMeta(type):
         if cls.__data__.abs_locked:
             raise TypeError(f"Class '{cls.__data__.name}' missing overrides for one or more abstract fields.")
 
-        print("called")
         new_method = getattr(cls, '__new__')
         init_method = getattr(cls, '__init__')
+        print("running", new_method)
         self = new_method(cls, *args, **kwargs)
+        print("running", init_method)
         init_method(self, *args, **kwargs)
         return self
 
