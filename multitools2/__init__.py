@@ -7,7 +7,7 @@ class TestParent(metaclass=MultiMeta):
     ]
 
     def __init__(self, data):
-        print(data)
+        print("init parent")
 
     def set_contents(self, value): ...
 

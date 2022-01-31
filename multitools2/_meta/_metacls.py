@@ -90,7 +90,11 @@ class MultiMeta(type):
         cls_data = type.__getattribute__(cls, DATA)
 
         mro = list(cls_data.mro)
+        # print(cls, mro)
         mro.pop(0)
+        print(cls, mro)
+
+        print(hasattr(mro[0]))
 
         for entry in mro:
             try:
@@ -212,7 +216,6 @@ class MultiMeta(type):
                 cls = type.__new__(mcs, name, bases, new_np)
 
                 cls_mro = mcs.__get_mro(cls, bases)
-                print(cls_mro)
 
                 # update cls.__data__.abs_locked:
                 cls_data = type.__getattribute__(cls, DATA)
@@ -239,6 +242,7 @@ class MultiMeta(type):
 
         def _init(self, *a, **kw):
             if base_init is object.__init__:
+                # print(f"{self}: base is {base_init}")
                 base_init(self)
             else:
                 base_init(self, *a, **kw)
@@ -246,6 +250,7 @@ class MultiMeta(type):
         # noinspection PyArgumentList
         def _new(c, *a, **kw):
             if base_new is object.__new__:
+                # print(f"{c}: base is {base_new}")
                 return base_new(c)
             return base_new(c, *a, **kw)
 
@@ -253,6 +258,7 @@ class MultiMeta(type):
             _init
         custom_new = cls.__data__.static_fields['__new__'].value if '__new__' in cls.__data__.static_fields else \
             _new
+        # print("creating", custom_init, custom_new)
         cls_data = type.__getattribute__(cls, DATA)
 
         # todo
@@ -261,11 +267,11 @@ class MultiMeta(type):
         # custom_new = cls_data.static_fields['__new__'].value if '__new__' in cls_data.static_fields else base_new
 
         def __init__(self, *initargs, **initkwargs):
-            print("init", self, initargs, initkwargs)
+            # print("init", self, initargs, initkwargs, custom_init)
             custom_init(self, *initargs, **initkwargs)
 
         def __new__(_cls, *newargs, **newkwargs):
-            print("new", _cls, newargs, newkwargs)
+            # print("new", _cls, newargs, newkwargs, custom_new)
 
             field_defs = _cls.__data__.field_defs
             self = custom_new(_cls, *newargs, **newkwargs)
@@ -277,6 +283,7 @@ class MultiMeta(type):
 
         type.__init__(cls, *args, **kwargs)
 
+        print(f"initializing class {cls.__qualname__}")
         __init__.__qualname__ = f"{cls.__qualname__}.__init__"
         __new__.__qualname__ = f"{cls.__qualname__}.__new__"
 
