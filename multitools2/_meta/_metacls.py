@@ -196,9 +196,7 @@ class MultiMeta(type):
 
                 for base in bases:
                     if isinstance(base, MultiMeta):
-                        print(type.__getattribute__(base, '__dict__'))
-                        print(base.__data__.instance_fields)
-                        # static_fields = {**static_fields, **base.__data__.static_fields}
+                        static_fields = {**static_fields, **base.__data__.static_fields}
                         instance_fields = {**instance_fields, **base.instance_fields}
 
                 # create the new namespace:
