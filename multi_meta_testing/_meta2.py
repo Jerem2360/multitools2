@@ -2,8 +2,94 @@
 import sys
 from dataclasses import dataclass
 
-from ._const import *
-from ._locals import *
+
+class MultiType(type):
+    def __repr__(cls):
+        return f"<multitools class '{cls.__name__}'>"
+
+
+# attribute decorations names:
+DEC_ABSTRACT = '__abstract__'
+DEC_STATIC = '__static__'
+DEC_CALLBACK = '__callback__'
+
+# secret names:
+SEC_DATA = '#00'
+SEC_TEMP_INIT = '#01'
+SEC_TEMP_NEW = '#02'
+SEC_TEMP_GETATTRIBUTE = '#03'
+SEC_VALUE = '#04'
+
+# error format strings:
+TYPE_ERROR_STR = "'{0}': Expected type '{1}', got '{2}' instead."
+ATTR_ERROR_STR = "'{0}' has no attribute '{1}'."
+POS_ARG_ERROR_STR = "'{0}' takes {1} positional arguments, but {2} were given."
+
+# multimeta flags:
+FLAG_ABSTRACT = 1
+FLAG_STATIC = 10
+
+# other:
+ITER = '__iter__'
+FIELDS = '__fields__'
+CLASSCELL = '__classcell__'
+INIT = '__init__'
+NEW = '__new__'
+GETATTRIBUTE = '__getattribute__'
+
+
+def _has_dec(value, dec):
+    """
+    Return whether the provided field has been decorated in the specified way.
+    """
+    try:
+        return getattr(value, dec)
+    except AttributeError:
+        return False
+
+
+def _give_dec(value, dec):
+    """
+    Decorate the provided field in the provided way and return it.
+    """
+    setattr(value, dec, True)
+    return value
+
+
+def _is_function(obj):
+    """
+    Return whether and object is a function / method or not.
+    """
+    func_t = type(lambda: None)
+    builtin_func_t = type(print)
+    return isinstance(obj, (func_t, builtin_func_t, staticmethod, classmethod))
+
+
+class _Field(metaclass=MultiType):
+
+    def __init__(self, value):
+        super().__setattr__(SEC_VALUE, value)
+
+    value = property(lambda self: super().__getattribute__(SEC_VALUE))
+    is_function = property(lambda self: _is_function(self.value))
+
+
+@dataclass
+class _Data(metaclass=MultiType):
+    name: str
+    bases: tuple[type]
+    static: dict[str, _Field]
+    instance: dict[str, _Field]
+    mro: list[type]
+    flags: int
+
+
+def _assure_field(value):
+    """
+    Convert value to a field if necessary. The result is guaranteed to be a
+    field object.
+    """
+    return value if isinstance(value, _Field) else _Field(value)
 
 
 class MultiMeta(MultiType):
@@ -17,8 +103,7 @@ class MultiMeta(MultiType):
             raise TypeError(TYPE_ERROR_STR.format('decorations', 'list[str]', type(decorations).__name__))
         for decoration in decorations:
             if not isinstance(decoration, str):
-                raise TypeError(
-                    TYPE_ERROR_STR.format('decorations', 'list[str]', f"list[{type(decoration).__name__}, ...]"))
+                raise TypeError(TYPE_ERROR_STR.format('decorations', 'list[str]', f"list[{type(decoration).__name__}, ...]"))
 
         match len(args):
             # first overload (name: str, bases: tuple, np: dict, decorations=[]) -> MultiMeta:
@@ -51,17 +136,17 @@ class MultiMeta(MultiType):
                 # save __init__, __new__ and __getattribute__ for MultiMeta.__init__():
                 mt_init = None
                 if INIT in np:
-                    mt_init = np[INIT] if is_function(np[INIT]) else None
+                    mt_init = np[INIT] if _is_function(np[INIT]) else None
                     del np[INIT]
 
                 mt_new = None
                 if NEW in np:
-                    mt_new = np[NEW] if is_function(np[NEW]) else None
+                    mt_new = np[NEW] if _is_function(np[NEW]) else None
                     del np[NEW]
 
                 mt_getattribute = None
                 if GETATTRIBUTE in np:
-                    mt_getattribute = np[GETATTRIBUTE] if is_function(np[GETATTRIBUTE]) else None
+                    mt_getattribute = np[GETATTRIBUTE] if _is_function(np[GETATTRIBUTE]) else None
                     del np[GETATTRIBUTE]
 
                 # fetch eventual field defs:
@@ -78,26 +163,26 @@ class MultiMeta(MultiType):
                 # sort fields:
                 mt_static = {}
                 mt_instance = {}
-                for an, av in np.items():
-                    field = assure_field(av)
+                for an, av in np:
+                    field = _assure_field(av)
 
                     # if field is a function, defaults to instance, otherwise defaults to static:
-                    if is_function(av):
-                        if has_dec(field, DEC_STATIC) and an not in mt_field_defs:
+                    if _is_function(av):
+                        if _has_dec(field, DEC_STATIC):
                             mt_static[an] = field
                             continue
                         mt_instance[an] = field
-                        if has_dec(field, DEC_CALLBACK):
+                        if _has_dec(field, DEC_CALLBACK):
                             mt_static[an] = field
                         continue
 
-                    if (an in mt_field_defs) and (not has_dec(field, DEC_STATIC)):
+                    if (an in mt_field_defs) and (not _has_dec(field, DEC_STATIC)):
                         mt_instance[an] = field
                         continue
                     mt_static[an] = field
 
                 # build class data
-                mt_data = Data(
+                mt_data = _Data(
                     name,
                     tuple(bases),
                     mt_static,
@@ -112,8 +197,6 @@ class MultiMeta(MultiType):
                     SEC_TEMP_INIT: mt_init,
                     SEC_TEMP_NEW: mt_new,
                     SEC_TEMP_GETATTRIBUTE: mt_getattribute,
-                    MRO: tuple(mt_mro),
-                    NAME: name,
                 }
                 # propagate __classcell__:
                 if mt_classcell is not None:
@@ -174,7 +257,6 @@ class MultiMeta(MultiType):
                 base_init(self)
 
         def __new__(c, *newargs, **newkwargs):
-            print(c, newargs, newkwargs)
             if d_new is not None:
                 self = d_new(c, *newargs, **newkwargs)
             else:
@@ -184,7 +266,7 @@ class MultiMeta(MultiType):
                 except TypeError:
                     self = base_new(c)
             for fk, fv in mt_data.instance.items():
-                self.__setattr__(fk, fv.value(self, c))
+                self.__setattr__(fk, fv.value)
             return self
 
         def __getattribute__(self, name):
@@ -199,7 +281,7 @@ class MultiMeta(MultiType):
             if hasattr(value, '__get__'):
                 value = value.__get__(self, type(self))
 
-            return value.value(self, cls) if isinstance(value, Field) else value
+            return value.value if isinstance(value, _Field) else value
 
         # update __qualname__ depending on the class:
         __init__.__qualname__ = f"{mt_data.name}.{INIT}"
@@ -212,19 +294,19 @@ class MultiMeta(MultiType):
         type.__setattr__(cls, GETATTRIBUTE, __getattribute__)
 
         # add __init__, __new__ and __getattribute__ to the static fields:
-        mt_data.static[INIT] = Field(__init__)
-        mt_data.static[NEW] = Field(__new__)
-        mt_data.static[GETATTRIBUTE] = Field(__getattribute__)
+        mt_data.static[INIT] = _Field(__init__)
+        mt_data.static[NEW] = _Field(__new__)
+        mt_data.static[GETATTRIBUTE] = _Field(__getattribute__)
 
         type.__setattr__(cls, SEC_DATA, mt_data)
 
     def __getattr__(cls, item):
         # fetch class data:
-        mt_data = type.__getattribute__(cls, SEC_DATA)
+        mt_data = type.__getattribute__(cls, item)
 
         # look for item in mt_data.static:
         if item in mt_data.static:
-            res = mt_data.static[item].value(None, cls) if isinstance(mt_data.static[item], Field) else mt_data.static[item]
+            res = mt_data.static[item].value if isinstance(mt_data.static[item], _Field) else mt_data.static[item]
             if hasattr(res, '__get__'):
                 return res.__get__(None, cls)
             return res
@@ -250,21 +332,21 @@ class MultiMeta(MultiType):
         mt_data = type.__getattribute__(cls, SEC_DATA)
 
         # make sure value is a field:
-        field = assure_field(value)
+        field = _assure_field(value)
 
         # if field is abstract, make the entire class abstract:
-        if has_dec(field, DEC_ABSTRACT):
+        if _has_dec(field, DEC_ABSTRACT):
             mt_data.flags |= FLAG_ABSTRACT
 
         # if field is a callback field, update __dict__, static and instance:
-        if has_dec(field, DEC_CALLBACK):
+        if _has_dec(field, DEC_CALLBACK):
             mt_data.static[key] = field
             mt_data.instance[value] = field
-            type.__setattr__(key, field.value(None, cls))
+            type.__setattr__(key, field.value)
 
         else:
             # update static or instance depending on the property of field:
-            if has_dec(field, DEC_STATIC):
+            if _has_dec(field, DEC_STATIC):
                 mt_data.static[key] = field
             else:
                 mt_data.instance[key] = field
@@ -284,28 +366,22 @@ class MultiMeta(MultiType):
 
         # make sure all abstract fields of parent classes are overridden:
         for entry in mt_data.mro:
+            base_attrs = entry.__dict__
             if isinstance(entry, MultiMeta):
                 base_data = type.__getattribute__(entry, SEC_DATA)
                 for sk, sv in base_data.static.items():
-                    if has_dec(sv, DEC_ABSTRACT) and (sk not in mt_data.static):
-                        raise TypeError(ABS_OVERRIDE_ERROR_STR.format(mt_data.name, sk))
-                for ik, iv in base_data.instance.items():
-                    if has_dec(iv, DEC_ABSTRACT) and (ik not in mt_data.instance):
-                        raise TypeError(ABS_OVERRIDE_ERROR_STR.format(mt_data.name, ik))
-            else:
-                for k, v in entry.__dict__.items():
-                    if has_dec(v, DEC_ABSTRACT) and (k not in mt_data.instance) and (k not in mt_data.static):
-                        raise TypeError(ABS_OVERRIDE_ERROR_STR.format(mt_data.name, k))
+                    if sv.abstract and sk not in mt_data.static:
+                        pass
 
         # call cls.__new__()
         try:
-            self = cls.__new__(cls, *args, **kwargs)
+            self = cls.__new__(*args, **kwargs)
         except Exception as e:
             raise type(e)(*e.args)
 
         # update self.__dict__ with instance attributes:
         for fk, fv in mt_data.instance.items():
-            setattr(self, fk, fv.value(self, cls))
+            setattr(self, fk, fv.value)
 
         # call self.__init__()
         try:
