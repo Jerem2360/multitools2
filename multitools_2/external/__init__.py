@@ -9,6 +9,8 @@ from multitools.dll import <dllname>
 
 will load and import the dll <dllname>, adding automatically the correct
 file extension depending on sys.platform.
+
+C types are located in external.typedefs
 """
 import ctypes as _ct
 
