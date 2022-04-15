@@ -4,3 +4,4 @@ import ctypes
 
 print(typedefs.Bool)
 
+print("hello")
