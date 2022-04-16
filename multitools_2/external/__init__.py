@@ -99,16 +99,17 @@ def calloc(count, size):
     return Pointer(_calloc(_ct.c_int(count), _ct.c_int(size)).value)
 
 
-def free(ptr):
+"""def free(ptr):
     _tp_check((ptr,), Pointer)
     _free = _msvcrt.reference("free", argtypes=(_ct.c_void_p,), restype=None)
     _free(_ct.c_void_p(ptr))
+"""  # doesn't work: memory corruption
 
 
 def realloc(ptr, size):
     _tp_check((ptr, size), Pointer, int)
     _realloc = _msvcrt.reference("realloc", argtypes=(_ct.c_void_p, _ct.c_int), restype=_ct.c_void_p)
-    return Pointer(_realloc(_ct.c_void_p(ptr), _ct.c_int(size)).value)
+    return Pointer(_realloc(_ct.c_void_p(ptr.__address__), _ct.c_int(size)).value)
 
 
 def sizeof(obj):

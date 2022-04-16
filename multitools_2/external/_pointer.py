@@ -1,102 +1,95 @@
-import ctypes
-import _ctypes
-from ctypes import util as _util
+import ctypes as _ct
 
 from .._meta import MultiMeta as _Mt
+from .._errors import *
 from .._typing import type_check as _tp_check
-from ._c_types import CType as _Ct, Int as _Int
+from ._c_types import CType as _Ct
+from ._decorators import dllimport as _dllimport
 
 
-_CData = ctypes.c_int.__mro__[-2]
-
-_malloc = ctypes.CDLL("msvcrt.dll").malloc
-_malloc.argtypes = (ctypes.c_int,)
-_malloc.restype = ctypes.c_void_p
+__all__ = [
+    "Pointer",
+]
 
 
-class Pointer(int, metaclass=_Mt):
-    __type__: _Ct | None = None
-    __size__ = ctypes.sizeof(ctypes.c_int)
+_ptr_types = {}
 
-    def __new__(cls, value, *args, **kwargs):
-        ## print("address:", value)
-        self = super().__new__(cls, value)
-        self._initialized = False
-        return self
+
+@_dllimport("msvcrt")
+def malloc(size: _ct.c_int) -> _ct.c_void_p: ...
+
+
+class Pointer(metaclass=_Mt):
+    __type__ = None
+    __size__ = _ct.sizeof(_ct.c_void_p)
 
     @classmethod
-    def allocate(cls, size):
-        _tp_check((size,), int)
-        return Pointer[cls.__type__](_malloc(ctypes.c_int(size)))
+    def allocate(cls, size=_ct.sizeof(_ct.c_int)):
+        """
+        Allocate space into memory and return a pointer to it.
+
+        For Pointer[None], allocate 'size' bytes of memory which defaults
+        to the size of an int.
+        For Pointer[type], always allocate sizeof(type) bytes of memory.
+        """
+        size = cls.__type__.__size__ if cls.__type__ is not None else size
+        ptr = malloc(_ct.c_int(size))
+        res = Pointer[cls.__type__](ptr)
+        return res
 
     @classmethod
     def addressof(cls, obj):
-        if isinstance(obj, _CData):
-            # noinspection PyTypeChecker
-            return Pointer[cls.__type__](ctypes.addressof(obj))
-        if isinstance(type(obj), _Ct):
-            return Pointer[cls.__type__](ctypes.addressof(obj.to_c()))
-        return Pointer(ctypes.addressof(obj))
+        """
+        Create and return a pointer that points to obj's address in memory.
+        """
+        if cls.__type__ is None:
+            _tp_check((type(obj),), _Ct)
+            return Pointer(_ct.addressof(obj.__handle__))
+        _tp_check((obj,), cls.__type__)
+        return Pointer[cls.__type__](_ct.addressof(obj.__handle__))
 
-    def deref(self):
+    def __new__(cls, address, *args, **kwargs):
+        """
+        Create and return a new Pointer[type] pointing to address.
+        """
+        _tp_check((address,), int)
+        self = super().__new__(cls)
+        self.__address__ = address
+        return self
+
+    def dereference(self):
+        """
+        Get the data the pointer points to, convert it to the pointer's type and return it.
+        """
         if self.__type__ is None:
-            raise ValueError("Cannot dereference a pointer to an unknown type.")
-        # noinspection PyTypeChecker
-        std_ptr = ctypes.cast(self, ctypes.POINTER(self.__type__.__c_base__))
-        if not self._initialized:
-            # noinspection PyAttributeOutsideInit
-            self._initialized = True
-            return self.__type__.from_c(std_ptr.contents)
-        return self.__type__(std_ptr[0])
+            raise TypeError("'void*' cannot be dereferenced.")
+        ptr = _ct.cast(self.__address__, _ct.POINTER(self.__type__.__c_base__))
+        return self.__type__.from_c(ptr[0])
 
     def __class_getitem__(cls, item):
         _tp_check((item,), (_Ct, None))
+        if item in _ptr_types:
+            return _ptr_types[item]
         res = cls
         res.__type__ = item
+        _ptr_types[item] = res
         return res
 
-    def __repr__(self):
-        tpname = 'void*'
-        if self.__type__ is not None:
-            tpname = self.__type__.base + '*' if isinstance(self.__type__, _Ct) else self.__type__.__name__ + '*'
+    @classmethod
+    def from_c(cls, ptr):
+        try:
+            val = _ct.cast(ptr, _ct.c_void_p)
+        except:
+            raise TypeError("Expected a pointer-like object.")
 
-        return f"<'{tpname}' pointer at {hex(id(self))}>"
-
-    def __getitem__(self, item):  # Access Violation? hum...
-        _tp_check((item,), int)
-        ## print("self:", int(self))
-        # noinspection PyTypeChecker
-        std_p = ctypes.cast(self, ctypes.POINTER(self.__type__.__c_base__))
-        ## print("ctypes.pointer at getitem:", ctypes.addressof(std_p.contents))
-        return self.__type__(std_p[item])
-
-    def __setitem__(self, key, value):
-        _tp_check((key, value), int, lambda val: TypeError("'value' must be a C value.") if not isinstance(type(val), _Ct) else 0)
-        # noinspection PyTypeChecker
-        std_p = ctypes.cast(self, ctypes.POINTER(self.__type__.__c_base__))
-        ## print("ctypes.pointer at setitem:", ctypes.addressof(std_p.contents))
-        std_p[key] = value.to_c()
-
-    def __iter__(self):
-        iterator = self
-        iterator._count = 0
-        return iterator
-
-    def __next__(self):
-        if not hasattr(self, '_count'):
-            raise StopIteration()
-        if self.__type__ is None:
-            size = 1
-        else:
-            size = self.__type__.__size__
-        memaddr = self + (self._count * size)
-        self._count += 1
-        if Pointer[_Int](memaddr).deref() == 0:  # NULL
-            raise StopIteration()
-        return Pointer[self.__type__](memaddr).deref()
+        return Pointer[cls.__type__](val.value)
 
     def to_c(self):
-        return self.__std__
+        if self.__type__ is None:
+            return _ct.cast(self.__address__, _ct.c_void_p)
 
-    __std__ = property(lambda self: ctypes.cast(self, ctypes.POINTER(self.__type__.__c_base__)))
+        return _ct.cast(self.__address__, _ct.POINTER(self.__type__.__c_base__))
+
+
+_ptr_types[None] = Pointer
 
