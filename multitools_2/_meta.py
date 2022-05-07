@@ -13,3 +13,12 @@ class MultiMeta(type):
         cls.__module__ = f"{GLOBAL_NAME}.{sub}"
         return cls
 
+    @staticmethod
+    def copy(instance, *newargs, **newkwargs):
+        """
+        Create a copy of instance in memory and return it.
+        """
+        copy = type(instance).__new__(type(instance), *newargs, **newkwargs)
+        copy.__dict__ = instance.__dict__.copy()
+        return copy
+

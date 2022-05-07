@@ -1,6 +1,9 @@
 from typing import Generic
 
 
+TYPE_ERR_STR = "Expected type '{0}', got '{1}' instead."
+
+
 def type_check(values, *types):
     if not isinstance(values, tuple):
         raise TypeError(f"'type_check():values': expected type 'tuple', got '{type(values).__name__}' instead.")
@@ -23,7 +26,8 @@ def type_check(values, *types):
                     continue
                 raise TypeError("type_check(): type arguments must be 'type | tuple[type | Callable] | Callable'.")
             case 0:
-                raise TypeError(f"Expected type '{res[1]}', got '{type(val).__name__}' instead.")
+                # raise TypeError(f"Expected type '{res[1]}', got '{type(val).__name__}' instead.")
+                raise TypeError(TYPE_ERR_STR.format(res[1], type(val).__name__))
             case _:
                 continue
 
