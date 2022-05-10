@@ -1,8 +1,7 @@
-from ._thread import Thread
-from ._process import Process
-from . import _thread
+from ._threads import Thread
+from . import _threads
 
 
 def __finalize__(*exc_info):
-    _thread.__finalize__()
+    _threads.__finalize__()
 

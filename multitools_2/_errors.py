@@ -76,6 +76,20 @@ class ThreadStateError(ThreadError):
 
 
 @_NoPath
+class ProcessError(BaseException):
+    pass
+
+
+@_NoPath
+class ProcessStartupError(ProcessError):
+    def __init__(self, *args, reason=None):
+        if reason is None:
+            super().__init__(*args)
+        else:
+            super().__init__(*args, f"(reason: {reason})")
+
+
+@_NoPath
 class OutOfScopeError(ProcessLookupError):
     def __init__(self, *args):
         if len(args) > 0:

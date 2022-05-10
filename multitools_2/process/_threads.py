@@ -1,11 +1,14 @@
 import _thread
-import sys
 import time
 
 from .._meta import MultiMeta
 from .._const import *
 from .._errors import *
 from .._typing import *
+from .._local import *
+
+
+_Lock = _thread.LockType
 
 
 _main_lock = _thread.allocate_lock()
@@ -15,6 +18,21 @@ _main_lock.acquire()
 __api = _thread
 __blocking_threads = {}
 __all_threads = {}
+
+
+print(__file__)
+
+
+def _interpret_tstate(tstate):
+    match tstate:
+        case 0:
+            return "Initialized"
+        case 1:
+            return "Running"
+        case 2:
+            return "Finalized"
+        case _:
+            return f"<thread state {tstate}>"
 
 
 # helpers for communicating with other processes:
@@ -52,7 +70,13 @@ def _distant_exc_info(wfunc, rfunc):
     return info[0], info[0](*eval(info[1])), None
 
 
-def _run_main_thread(th=None):
+@noPath
+@customName("main()")
+def _run_main_thread(th):
+    """
+    Run the main program.
+    This function's purpose is only to fill in the main thread's '__callable__' slot.
+    """
     import __main__
     main_file = open(__main__.__file__, "r+")
     main_code = main_file.read()
@@ -64,15 +88,36 @@ def _run_main_thread(th=None):
     exec(compile(main_code, __main__.__file__, "exec"), {'sys': local_sys}, {})
 
 
-# noinspection PyPropertyAccess
+@customPath(GLOBAL_NAME)
+class _RemoteExecution:
+    """
+    Helper class for running invoked functions
+    """
+    __qualname__ = "execution_info"
+
+    def __init__(self, function, globals_, *args, **kwargs):
+        self.__func__ = function
+        self.__args__ = args
+        self.__kwargs__ = kwargs
+        self.__globals__ = globals_
+        self.__result__ = NULL
+
+    def execute(self, thread):
+        exec("self.__result__ = self.__func__(th, *self.__args__, **self.__kwargs__)", self.__globals__, {'self': self, 'th': thread})
+
+    result = property(lambda self: self.__result__)
+
+    def __repr__(self):
+        return f"<execution info of '{self.__func__}' at {hex(id(self))}>"
+
+
+# noinspection PyPropertyAccess,PyUnresolvedReferences
 class Thread(metaclass=MultiMeta):
     # attributes that may request distant access:
     __tstate__ = property(*_spec_prop('__tstate__', raise_=True))
     __callable__ = property(*_spec_prop('__callable__', default=NO_OP_THREAD_CALLABLE))
     __join_lock__ = property(*_spec_prop('__join_lock__'))
     __daemon__ = property(*_spec_prop('__daemon__', raise_=True))
-    __remote_executions__ = property(*_spec_prop('__remote_executions__', default=[]))
-    __trace__ = property(*_spec_prop('__trace__', default=lambda frame, event, args: None))
 
     @property
     def __result__(self):
@@ -87,8 +132,10 @@ class Thread(metaclass=MultiMeta):
         Initialize a new thread model, given what should its threads do as 'activity'.
         'activity' must be a callable that accepts at least one argument, the actual thread.
         """
+        self._do_listen = True
         if not callable(activity):
             raise TypeError(TYPE_ERR_STR.format('(Thread, ...) -> Any', type(activity).__name__))
+        # noinspection PyUnresolvedReferences
         if hasattr(activity, '__code__') and activity.__code__.co_argcount <= 0:
             raise TypeError(TYPE_ERR_STR.format('(Thread, ...) -> Any', type(activity).__name__))
 
@@ -98,14 +145,14 @@ class Thread(metaclass=MultiMeta):
         self._exc_info = (None, None, None)
         self._is_tracing_opcode = False
         self._running = False
+        self._tracefunc = NO_OP_TRACER
+        self._invoke_list = []
 
         # set our info ourselves since we are local:
         self._set_info('tstate', TSTATE_INITIALIZED)
-        self._set_info('callable', NO_OP_THREAD_CALLABLE)
+        self._set_info('callable', activity)
         self._set_info('join_lock', _thread.allocate_lock())
         self._set_info('daemon', daemon)
-        self._set_info('remote_executions', [])
-        self._set_info('trace', lambda frame, event, args: None)
         self._set_info('result', None)
 
         # function standards:
@@ -161,12 +208,19 @@ class Thread(metaclass=MultiMeta):
         thread._reach = distance  # needed for _get_info() and friends
         thread._id = id_ if id_ is not None else 0  # needed for _get_info() and friends since we may be distant
         thread._is_tracing_opcode = False
+        thread._do_listen = True
+        thread._tracefunc = NO_OP_TRACER
+        thread._invoke_list = []
 
         if thread._main:
             thread._exc_info = (None, None, None)
             lock = _main_lock
+            thread._set_info('trace', sys.gettrace())
+            sys.settrace(thread._invoker)
         else:
             thread._exc_info = None  # None means we don't support Thread.exc_info()
+            thread._set_info('trace', NO_OP_TRACER)
+
 
         if callable_ is None:
             if thread._main:
@@ -176,18 +230,19 @@ class Thread(metaclass=MultiMeta):
 
         if tstate == TSTATE_INITIALIZED:
             thread._running = False
-            if not thread._has_info('daemon'):
-                thread._set_info('daemon', daemon)
-            if not thread._has_info('callable'):
-                thread._set_info('callable', callable_)
-            if not thread._has_info('join_lock'):
-                thread._set_info('join_lock', lock)
-            if not thread._has_info('tstate'):
-                thread._set_info('tstate', tstate)
+
+        if not thread._has_info('daemon'):
+            thread._set_info('daemon', daemon)
+        if not thread._has_info('callable'):
+            thread._set_info('callable', callable_)
+        if not thread._has_info('join_lock'):
+            thread._set_info('join_lock', lock)
+        if not thread._has_info('tstate'):
+            thread._set_info('tstate', tstate)
 
         # function standards:
-        thread.__code__ = None
-        thread.__kwdefaults__ = None
+        thread.__code__ = NULL_CODE
+        thread.__kwdefaults__ = {}
         thread.__defaults__ = ()
         thread.__annotations__ = {}
         thread.__builtins__ = BUILTINS_DICT
@@ -195,7 +250,7 @@ class Thread(metaclass=MultiMeta):
         thread.__globals__ = globals()
         thread.__module__ = "<unknown>"
         thread.__name__ = f"thread:{thread._id}"
-        thread.__qualname__ = f"{self.__module__}.{self.__name__}"
+        thread.__qualname__ = f"{thread.__module__}.{thread.__name__}"
 
         return thread
 
@@ -212,10 +267,62 @@ class Thread(metaclass=MultiMeta):
         if self._reach['distant']:
             return self._run_distant(*args, **kwargs)
 
-        return self._run_local()
+        return self._run_local(*args, **kwargs)
+
+    def __repr__(self):
+        if self.__tstate__ == TSTATE_INITIALIZED:
+            return f"<thread model at {hex(id(self))}>"
+        return f"<thread {self._id} at {hex(id(self))}, state={_interpret_tstate(self.__tstate__)}>"
+
+    def join(self):
+        if self._id == _thread.get_ident():
+            raise ThreadStateError("Threads cannot join themselves.")
+        if not self._reach['distant']:
+            self.__join_lock__.acquire()
+            self.__join_lock__.release()
+            return
+        while self.__tstate__ != TSTATE_FINALIZED:
+            time.sleep(0.5)
+        return
+
+    def invoke(self, function, *args, **kwargs):
+        if not callable(function):
+            raise TypeError(TYPE_ERR_STR.format('(FrameType, str, Any) -> function', type(function).__name__))
+
+        invoked = _RemoteExecution(function, globals(), *args, **kwargs)
+        self._invoke_list.append(invoked)
+        return invoked
+
+    def settrace(self, function):
+        if not callable(function):
+            raise TypeError(TYPE_ERR_STR.format('(FrameType, str, Any) -> function', type(function).__name__))
+        # noinspection PyUnresolvedReferences
+        if hasattr(function, '__code__') and function.__code__.co_argcount != 3:
+            raise TypeError(TYPE_ERR_STR.format('(FrameType, str, Any) -> function', type(function).__name__))
+
+        if self.__tstate__ == TSTATE_FINALIZED:
+            return
+
+        self._tracefunc = function
+
+    def gettrace(self):
+        if self._tracefunc == NO_OP_TRACER:
+            return None
+        return self._tracefunc
+
+    def exc_info(self):
+        if self.__tstate__ != TSTATE_INITIALIZED:
+            return self._exc_info
+
+    @staticmethod
+    def get_main():
+        return _main_thread
+
+    def __stop_listener__(self):
+        self._do_listen = False
 
     def _run_distant(self, *args, **kwargs):
-        _send_distant(self._reach['write'], bytes(ASK_EXECUTE, encoding=DEFAULT_ENCODING))
+        _send_distant(self._reach['write'], bytes(THREAD_EXECUTE, encoding=DEFAULT_ENCODING))
         _res = _receive_distant(self._reach['read'])
         if _res == TPM_ERR_PERMISSION:  # something went wrong when calling the thread
             raise PermissionError("Access denied.")
@@ -240,50 +347,60 @@ class Thread(metaclass=MultiMeta):
 
             time.sleep(0.01)
             exc_info = res._exc_info if res._exc_info is not None else (None, None, None)
-            # sys.settrace(self._invoker)
+            sys.settrace(self._invoker)
 
             try:
-                result = res.__callable__(*args, **kwargs)
+                result = res.__callable__(res, *args, **kwargs)
                 res._set_info('result', result)
             except:
                 exc_info = sys.exc_info()
-                sys.stderr.write(f"Exception ignored in thread {res.__id__}:\n")
+                sys.stderr.write(f"Exception ignored in thread {res._id}:\n")
                 sys.excepthook(*sys.exc_info())
 
             res._exc_info = exc_info
             res.__tstate__ = TSTATE_FINALIZED
             res._running = False
-            res._release()
+            res._unrecord()
             res.__join_lock__.release()
 
         res.__tstate__ = TSTATE_RUNNING
         res._id = _thread.start_new_thread(activity, ())
         res._running = True
+        res._record()
         time.sleep(0.03)
-
-        if not res.__daemon__:
-            globals()['__blocking_threads'][res.__id__] = res
-
-        globals()['__all_threads'][res.__id__] = res
         return res
 
-    def join(self):
-        if self._id == _thread.get_ident():
-            raise ThreadStateError("Threads cannot join themselves.")
-        if not self._reach['distant']:
-            self.__join_lock__.acquire()
-            self.__join_lock__.release()
-            return
-        while self.__tstate__ != TSTATE_FINALIZED:
-            time.sleep(0.5)
-        return
+    def _record(self):
+        if not self.__daemon__:
+            globals()['__blocking_threads'][self._id] = self
+        globals()['__all_threads'][self._id] = self
 
-    @staticmethod
-    def get_main():
-        return _main_thread
+    def _unrecord(self):
+        if not self.__daemon__:
+            del globals()['__blocking_threads'][self._id]
+        del globals()['__all_threads'][self._id]
 
-    def _release(self):
-        del globals()['__all_threads'][self.__id__]
+    def _invoker(self, frame, event, args):
+        if self._reach['distant'] and (len(self._invoke_list) > 0):
+            raise NotImplementedError("Cannot invoke a callable in a distant process.")
+
+        self._tracefunc(frame, event, args)
+        if not self._is_tracing_opcode:
+            frame.f_trace_opcodes = True
+            self._is_tracing_opcode = True
+
+        if event == EVENT_OPCODE:
+            if len(self._invoke_list) > 0:
+                invoked = self._invoke_list[0]
+                try:
+                    invoked.execute(self)
+                except:
+                    sys.stderr.write(f"Exception ignored for remote call in thread {self._id}:\n")
+                    sys.excepthook(*sys.exc_info())
+                self._invoke_list.pop(0)
+
+        return self._invoker
+
 
     def _get_info(self, key, default=None, raise_=False):
         result = NULL_BYTE
@@ -306,7 +423,7 @@ class Thread(metaclass=MultiMeta):
         return result
 
     def _set_info(self, key, value):
-        if self._reach['distance'] and self._running:
+        if self._reach['distant'] and self._running:
             real_value = repr(value) if eval(repr(value)) == value else eval(value.__dict__)
             msg = SET_THREAD_ATTR.format(self._id, key, real_value)
             _send_distant(self._reach['write'], bytes(msg, encoding=DEFAULT_ENCODING))
@@ -330,6 +447,12 @@ class Thread(metaclass=MultiMeta):
         raise ThreadStateError("Thread has not finished executing.")
 
 
+    state = property(lambda self: _interpret_tstate(self.__tstate__))
+    id = property(lambda self: self._id)
+    daemon = property(lambda self: self.__daemon__)
+    result = property(lambda self: self.__result__)
+
+
 _main_thread = Thread.__obtain__(
     id_=MAIN_THREAD_ID, tstate=TSTATE_RUNNING, callable_=_run_main_thread, is_main=True, lock=_main_lock,
     distance={'distant': False, 'read': None, 'write': None}
@@ -337,8 +460,13 @@ _main_thread = Thread.__obtain__(
 
 
 def __finalize__():
-    for _id, _thread in __blocking_threads.items():
+    blocking = __blocking_threads.copy()
+    for _id, _thread in blocking.items():
         _thread.join()
-    _main_lock.release()
+        _thread.__stop_listener__()
+    try:
+        _main_lock.release()
+    except:
+        pass
 
 

@@ -1,22 +1,17 @@
-from multitools_2 import _const
-import sys
-from types import TracebackType
-import pickle
+import multiprocessing
+import time
+
+from multitools_2 import process
 
 
-try:
-    raise TypeError("error")
-except:
+def activity(*args, **kwargs):
+    start = time.localtime().tm_sec
+    while time.localtime().tm_sec != (start + 3):
+        pass
 
-    """ei = sys.exc_info()
-    tb: TracebackType = ei[2]
-    print(str(tb))"""
 
-    info = eval(_const.ASK_LAST_ERR)
-    print(info)
-    exc_info = info[0], eval(info[1]), None
-    print(exc_info)
-    # exc_info = info[0], eval(info[1]), eval(info[2])
-    # print(exc_info)
-
+if __name__ == '__main__':
+    proc = multiprocessing.Process(target=activity)
+    proc.start()
+    print(getattr(proc, '_popen'))
 
