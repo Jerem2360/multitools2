@@ -107,7 +107,7 @@ def start_new_process(command, options):
     error_stream = options.get_option("err", os.pipe())
     startupinfo = options.get_option("startupinfo", ProcessStartupInfo())
     flags = options.get_option("flags", 0)
-    env_vars = options.get_option("environment_vars", {})
+    env_vars = options.get_option("environ", {})
     curdir = options.get_option("curdir", "")
     close_fds = options.get_option("close_fds", True)
 
