@@ -52,3 +52,7 @@ def customName(name):
         return x
     return _wrap
 
+def object_info(name) -> property:
+    def _getter(self, *args, **kwargs):
+        return
+

@@ -1,16 +1,30 @@
 """
 Process implementation for Windows platforms.
+Important:
+    Some code in here is borrowed from the subprocess or multiprocessing modules.
 """
 import contextlib
+import io
 import os
+import sys
 
 from .._typing import *
 from .._const import *
 from .._errors import *
 
-import subprocess
 import _winapi
-import msvcrt
+import ctypes as _ctypes
+from ctypes import wintypes as _wt
+
+
+_kernel32 = _ctypes.WinDLL('kernel32.dll')
+
+
+_kernel32.GetCurrentProcessId.restype = _wt.DWORD
+
+
+STILL_ACTIVE = 259
+
 
 _PIPE = -1
 _STDOUT = -2
@@ -18,30 +32,25 @@ _DEVNULL = -3
 
 _FILE_TYPE_CHAR = 2
 
+SW_SHOW = 5
 
-def _filter_handle_list(handle_list):
-    # borrowed from subprocess module
-    return list({handle for handle in handle_list
-                 if handle & 0x3 != 0x3
-                 or _winapi.GetFileType(handle) !=
-                 _FILE_TYPE_CHAR})
+
+_all_processes = {}
 
 
 class ProcessStartupInfo:
     # borrowed from subprocess module
     def __init__(self, *, dwFlags=0, hStdInput=None, hStdOutput=None,
-                 hStdError=None, wShowWindow=0, lpAttributeList=None):
+                 hStdError=None, wShowWindow=_winapi.SW_HIDE, lpAttributeList=None):
         self.dwFlags = dwFlags
         self.hStdInput = hStdInput
         self.hStdOutput = hStdOutput
         self.hStdError = hStdError
         self.wShowWindow = wShowWindow
-        self.lpAttributeList = lpAttributeList or {"handle_list": []}
+        self.lpAttributeList = lpAttributeList
 
     def copy(self):
-        attr_list = self.lpAttributeList.copy()
-        if 'handle_list' in attr_list:
-            attr_list['handle_list'] = list(attr_list['handle_list'])
+        attr_list = self.lpAttributeList.copy() if self.lpAttributeList is not None else None
 
         return ProcessStartupInfo(dwFlags=self.dwFlags,
                                   hStdInput=self.hStdInput,
@@ -60,7 +69,10 @@ class Handle(int):
     def close(self):
         if not self._closed:
             self._closed = True
-        _winapi.CloseHandle(self)
+            try:
+                _winapi.CloseHandle(self)
+            except OSError:
+                pass
 
     def detach(self):
         if not self._closed:
@@ -96,32 +108,43 @@ class ProcessStartOptions:
 def start_new_process(command, options):
     """
     Start new process.
-    Returns (process_info, thread_id, pipes);  where:
+    Returns (process_info, thread_info, pipes);  where:
 
-    - process_info is a tuple of process handle and process id
-    - thread_id is the process primary thread's id
+    - process_info is a tuple of process id, process handle and process standard io
+    - thread_info is a tuple of the primary thread's id and a handle to it
     - pipes is a tuple of the process communication streams read, write and error
     """
-    parent_to_child = options.get_option("p2c", os.pipe())
-    child_to_parent = options.get_option("c2p", os.pipe())
-    error_stream = options.get_option("err", os.pipe())
+    parent_to_child = options.get_option("p2c", create_new_pipe())
+    child_to_parent = options.get_option("c2p", create_new_pipe())
+    error_stream = options.get_option("err", create_new_pipe())
     startupinfo = options.get_option("startupinfo", ProcessStartupInfo())
     flags = options.get_option("flags", 0)
     env_vars = options.get_option("environ", {})
     curdir = options.get_option("curdir", "")
     close_fds = options.get_option("close_fds", True)
+    create_console = options.get_option('create_console', False)
 
     if curdir == "":
         curdir = None
+    if env_vars == {}:
+        env_vars = None
 
     startupinfo = startupinfo.copy()
+
+    proc_stdin = create_new_pipe()
+    proc_stdout = create_new_pipe()
 
     use_std_handles = -1 not in (parent_to_child[0], child_to_parent[1], error_stream[1])
     if use_std_handles:
         startupinfo.dwFlags |= _winapi.STARTF_USESTDHANDLES
-        startupinfo.hStdInput = parent_to_child[0]
-        startupinfo.hStdOutput = child_to_parent[1]
+        startupinfo.hStdInput = proc_stdin
+        startupinfo.hStdOutput = proc_stdout
         startupinfo.hStdError = error_stream[1]
+    if startupinfo.wShowWindow > 0:
+        startupinfo.dwFlags |= _winapi.STARTF_USESHOWWINDOW
+
+    if create_console:
+        flags |= _winapi.CREATE_NEW_CONSOLE
 
     attribute_list = startupinfo.lpAttributeList
     have_handle_list = bool(attribute_list and "handle_list" in attribute_list and attribute_list["handle_list"])
@@ -135,37 +158,35 @@ def start_new_process(command, options):
         if use_std_handles:
             handle_list += [int(parent_to_child[0]), int(child_to_parent[1]), int(error_stream[1])]
 
-    err = None
-    tid, pid = 0, 0
-    proc_h, thread_h = Handle(0), Handle(0)
     try:
         proc_h, thread_h, pid, tid = _winapi.CreateProcess(
-            None,
+            sys.executable,
             command,
             None, None,
-            int(not close_fds),
+            True,
             flags,
             env_vars,
             curdir,
             startupinfo
         )
-    except WindowsError as e:
-        err = e.strerror, e.winerror
+    except WindowsError or OSError as e:
+        raise ProcessStartupError(e.strerror + f' (WinError {e.winerror}, {hex(e.winerror)})') from None
 
     finally:
-        with contextlib.ExitStack() as s:
-            s.callback(os.close, parent_to_child[0])
-            s.callback(os.close, child_to_parent[1])
-            s.callback(os.close, error_stream[1])
+        if close_fds:
+            with contextlib.ExitStack() as s:
+                s.callback(_winapi.CloseHandle, parent_to_child[0])
+                s.callback(_winapi.CloseHandle, child_to_parent[1])
+                s.callback(_winapi.CloseHandle, error_stream[1])
 
-    if err is not None:
-        raise ProcessStartupError(err[0], f'(code {hex(err[1])})')
-
-    proc_info = pid, Handle(proc_h),
-    Handle(thread_h).close()
+    proc_info = pid, Handle(proc_h), (proc_stdin, proc_stdout)
+    # Handle(thread_h).close()
+    th_info = (tid, Handle(thread_h))
     pipes = child_to_parent[0], parent_to_child[1], error_stream[0]  # in, out, err
 
-    return proc_info, tid, pipes
+    _all_processes[pid] = proc_h
+
+    return proc_info, th_info, pipes
 
 
 def execute_command(command, options=None, curdir=None):
@@ -182,4 +203,91 @@ def execute_command(command, options=None, curdir=None):
 
     return start_new_process(f"{SHELL} /c \"{command}\"", options)
 
+
+def create_new_pipe():
+    """
+    Create a new pipe and return a pair of read and write inheritable handles.
+    """
+    pipe = _winapi.CreatePipe(None, 0)
+    # make handles inheritable:
+    # *following code borrowed from subprocess module*:
+    read = _winapi.DuplicateHandle(
+        _winapi.GetCurrentProcess(),
+        pipe[0],
+        _winapi.GetCurrentProcess(),
+        0,
+        True,
+        _winapi.DUPLICATE_SAME_ACCESS
+    )
+    write = _winapi.DuplicateHandle(
+        _winapi.GetCurrentProcess(),
+        pipe[1],
+        _winapi.GetCurrentProcess(),
+        0,
+        True,
+        _winapi.DUPLICATE_SAME_ACCESS
+    )
+    return read, write
+
+
+def close_descr(descr):
+    _winapi.CloseHandle(descr)
+
+
+def read_descr(descr, size):
+    res = _winapi.ReadFile(descr, size)
+    return res[1]
+
+
+def write_descr(descr, data):
+    return _winapi.WriteFile(descr, data)
+
+
+def terminate_process(pid):
+    """
+    Attempt to terminate a process.
+    Return whether this function succeeded.
+    """
+    if pid not in _all_processes:
+        hproc = _winapi.OpenProcess(0, True, pid)
+    else:
+        hproc = _all_processes[pid]
+
+    try:
+        _winapi.TerminateProcess(hproc, -1)
+    except:
+        return False
+    return True
+
+
+def kill_process(pid):
+    """
+    Attempt to kill a process.
+    Return whether this function has succeeded.
+    """
+    return terminate_process(pid)
+
+
+def get_current_process():
+    """
+    Return the current process' pid.
+    """
+    pid: _wt.DWORD = _kernel32.GetCurrentProcessId()
+    try:
+        return pid.value
+    except:
+        return pid
+
+
+def get_process_exit_code(pid):
+    try:
+        if pid not in _all_processes:
+            hproc = _winapi.OpenProcess(0, True, pid)
+        else:
+            hproc = _all_processes[pid]
+
+        ecode = _winapi.GetExitCodeProcess(hproc)
+        return STILL_ACTIVE if ecode == _winapi.STILL_ACTIVE else ecode
+    except OSError as e:
+        raise ProcessLookupError(*e.args) from None
 

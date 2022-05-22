@@ -20,9 +20,6 @@ __blocking_threads = {}
 __all_threads = {}
 
 
-print(__file__)
-
-
 def _interpret_tstate(tstate):
     match tstate:
         case 0:
@@ -115,13 +112,13 @@ class _RemoteExecution:
 class Thread(metaclass=MultiMeta):
     # attributes that may request distant access:
     __tstate__ = property(*_spec_prop('__tstate__', raise_=True))
-    __callable__ = property(*_spec_prop('__callable__', default=NO_OP_THREAD_CALLABLE))
+    __callable__ = property(*_spec_prop('__callable__', default=NO_OP_THREAD_TARGET))
     __join_lock__ = property(*_spec_prop('__join_lock__'))
     __daemon__ = property(*_spec_prop('__daemon__', raise_=True))
 
     @property
     def __result__(self):
-        if self.__tstate__ == TSTATE_FINALIZED:
+        if self.__tstate__ == STATE_FINALIZED:
             return self._get_info('result')
         raise ThreadStateError("Thread has not finished executing.")
 
@@ -149,7 +146,7 @@ class Thread(metaclass=MultiMeta):
         self._invoke_list = []
 
         # set our info ourselves since we are local:
-        self._set_info('tstate', TSTATE_INITIALIZED)
+        self._set_info('tstate', STATE_INITIALIZED)
         self._set_info('callable', activity)
         self._set_info('join_lock', _thread.allocate_lock())
         self._set_info('daemon', daemon)
@@ -173,7 +170,7 @@ class Thread(metaclass=MultiMeta):
     def __obtain__(
             cls,
             id_=None,
-            tstate=TSTATE_INITIALIZED,
+            tstate=STATE_INITIALIZED,
             callable_=None,
             lock=None,
             daemon=False,
@@ -226,9 +223,9 @@ class Thread(metaclass=MultiMeta):
             if thread._main:
                 callable_ = _run_main_thread
             else:
-                callable_ = NO_OP_THREAD_CALLABLE
+                callable_ = NO_OP_THREAD_TARGET
 
-        if tstate == TSTATE_INITIALIZED:
+        if tstate == STATE_INITIALIZED:
             thread._running = False
 
         if not thread._has_info('daemon'):
@@ -258,8 +255,8 @@ class Thread(metaclass=MultiMeta):
         """
         Run a model's activity in a separate thread of control given args and kwargs, and return the latter.
         """
-        if self.__tstate__ != TSTATE_INITIALIZED:
-            raise ThreadStateError(expected=TSTATE_INITIALIZED, got=self.__tstate__)
+        if self.__tstate__ != STATE_INITIALIZED:
+            raise ThreadStateError(expected=STATE_INITIALIZED, got=self.__tstate__)
 
         if self.__join_lock__ is None:
             raise PermissionError("Access denied.")
@@ -270,7 +267,7 @@ class Thread(metaclass=MultiMeta):
         return self._run_local(*args, **kwargs)
 
     def __repr__(self):
-        if self.__tstate__ == TSTATE_INITIALIZED:
+        if self.__tstate__ == STATE_INITIALIZED:
             return f"<thread model at {hex(id(self))}>"
         return f"<thread {self._id} at {hex(id(self))}, state={_interpret_tstate(self.__tstate__)}>"
 
@@ -281,7 +278,7 @@ class Thread(metaclass=MultiMeta):
             self.__join_lock__.acquire()
             self.__join_lock__.release()
             return
-        while self.__tstate__ != TSTATE_FINALIZED:
+        while self.__tstate__ != STATE_FINALIZED:
             time.sleep(0.5)
         return
 
@@ -300,7 +297,7 @@ class Thread(metaclass=MultiMeta):
         if hasattr(function, '__code__') and function.__code__.co_argcount != 3:
             raise TypeError(TYPE_ERR_STR.format('(FrameType, str, Any) -> function', type(function).__name__))
 
-        if self.__tstate__ == TSTATE_FINALIZED:
+        if self.__tstate__ == STATE_FINALIZED:
             return
 
         self._tracefunc = function
@@ -311,7 +308,7 @@ class Thread(metaclass=MultiMeta):
         return self._tracefunc
 
     def exc_info(self):
-        if self.__tstate__ != TSTATE_INITIALIZED:
+        if self.__tstate__ != STATE_INITIALIZED:
             return self._exc_info
 
     @staticmethod
@@ -329,7 +326,7 @@ class Thread(metaclass=MultiMeta):
         elif _res == NULL_BYTE:
             exc_info = _distant_exc_info(self._reach['write'], self._reach['read'])
             res = MultiMeta.copy(self)
-            res.__tstate__ = TSTATE_FINALIZED
+            res.__tstate__ = STATE_FINALIZED
             res._exc_info = exc_info
             return res
 
@@ -358,12 +355,12 @@ class Thread(metaclass=MultiMeta):
                 sys.excepthook(*sys.exc_info())
 
             res._exc_info = exc_info
-            res.__tstate__ = TSTATE_FINALIZED
+            res.__tstate__ = STATE_FINALIZED
             res._running = False
             res._unrecord()
             res.__join_lock__.release()
 
-        res.__tstate__ = TSTATE_RUNNING
+        res.__tstate__ = STATE_RUNNING
         res._id = _thread.start_new_thread(activity, ())
         res._running = True
         res._record()
@@ -442,7 +439,7 @@ class Thread(metaclass=MultiMeta):
         return True
 
     def _get_result(self):
-        if self.__tstate__ == TSTATE_FINALIZED:
+        if self.__tstate__ == STATE_FINALIZED:
             return self._get_info('result')
         raise ThreadStateError("Thread has not finished executing.")
 
@@ -454,7 +451,7 @@ class Thread(metaclass=MultiMeta):
 
 
 _main_thread = Thread.__obtain__(
-    id_=MAIN_THREAD_ID, tstate=TSTATE_RUNNING, callable_=_run_main_thread, is_main=True, lock=_main_lock,
+    id_=MAIN_THREAD_ID, tstate=STATE_RUNNING, callable_=_run_main_thread, is_main=True, lock=_main_lock,
     distance={'distant': False, 'read': None, 'write': None}
 )
 

@@ -60,7 +60,7 @@ def _shutdown(*args, **kwargs):
             callback(*exc_info)
         except:
             sys.stderr.write(f"Failed to finalize {GLOBAL_NAME}.{source}. Traceback:\n")
-            traceback.print_exc()
+            sys.excepthook(*sys.exc_info())
             break
 
 

@@ -5,11 +5,15 @@ Process implementation for posix platforms.
 import _thread
 import _posixsubprocess
 import os
+import signal
 import time
 
 from .._typing import *
 from .._const import *
 from .._errors import *
+
+
+STILL_ACTIVE = 259
 
 
 class ProcessStartOptions:
@@ -56,6 +60,9 @@ def _spawnv(path, args, fd_keep_open, working_dir, env_vars, pre_exec):
 
     tid = 0
 
+    proc_stdin = create_new_pipe()
+    proc_stdout = create_new_pipe()
+
     def _pre_exec():
         tid_lock.acquire()
         globals()['tid'] = _thread.get_ident()
@@ -65,7 +72,7 @@ def _spawnv(path, args, fd_keep_open, working_dir, env_vars, pre_exec):
     try:
         # noinspection PyTypeChecker
         pid = _posixsubprocess.fork_exec(args, [os.fsencode(path)], True, fd_keep_open, working_dir,
-                                         env_vars, *p2c, *c2p, *errors, *errpipe, False, False,
+                                         env_vars, *proc_stdin, *proc_stdout, *errors, *errpipe, False, False,
                                          None, None, None, -1, _pre_exec)
     finally:
         # close pipe sides we aren't meant to own, no matter what:
@@ -87,7 +94,7 @@ def _spawnv(path, args, fd_keep_open, working_dir, env_vars, pre_exec):
         raise ProcessStartupError("Failed to initialize primary thread.")
 
     pipes = c2p[0], p2c[1], errpipe[0]  # in, out, err
-    return (pid, None), tid, pipes
+    return (pid, None), (tid, None), pipes
 
 
 def start_new_process(command, options):
@@ -95,7 +102,7 @@ def start_new_process(command, options):
     Start new process.
     Returns (process_info, thread_id, pipes);  where:
 
-    - process_info is a tuple of process id and None (None is there for platform compatibility)
+    - process_info is a tuple of process id, None and process standard io (None is there for platform compatibility)
     - thread_id is the process primary thread's id
     - pipes is a tuple of the process communication streams read, write and error
     """
@@ -122,4 +129,64 @@ def execute_command(command, options=None, curdir=None):
 
     cmd = f"{SHELL} -c \"{command}\""
     return start_new_process(cmd, options)
+
+
+def create_new_pipe():
+    """
+    Create a new pipe and return a pair of read and write inheritable handles.
+    """
+    return os.pipe()
+
+
+def close_descr(descr):
+    os.close(descr)
+
+
+def read_descr(descr, size):
+    return os.read(descr, size)
+
+
+def write_descr(descr, data):
+    return os.write(descr, data)
+
+
+def terminate_process(pid):
+    """
+    Attempt to terminate a process.
+    Return whether this function succeeded.
+    """
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except PermissionError:
+        return False
+    return True
+
+
+def kill_process(pid):
+    """
+    Attempt to kill a process.
+    Return whether this function has succeeded.
+    """
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except PermissionError:
+        return False
+    return True
+
+
+def get_current_process():
+    """
+    Return the current process' pid.
+    """
+    return os.getpid()
+
+
+def get_process_exit_code(pid):
+    pid, status = os.waitpid(pid, os.WNOHANG)
+    if os.WIFEXITED(status):
+        # noinspection PyUnresolvedReferences
+        return os.waitstatus_to_exitcode(status)
+    if os.WIFSTOPPED(status):
+        return -1
+    return STILL_ACTIVE
 

@@ -2,6 +2,7 @@ import sys
 
 
 ATTRIB_ERR_STR = "'{0}' object has no attribute '{1}'."
+POS_ARGCOUNT_ERR_STR = "{0} accepts {1} positional argument(s), but {2} were given."
 
 
 def _NoPath(error):
@@ -87,6 +88,11 @@ class ProcessStartupError(ProcessError):
             super().__init__(*args)
         else:
             super().__init__(*args, f"(reason: {reason})")
+
+
+@_NoPath
+class ProcessStateError(ProcessError):
+    pass
 
 
 @_NoPath

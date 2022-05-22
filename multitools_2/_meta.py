@@ -22,3 +22,17 @@ class MultiMeta(type):
         copy.__dict__ = instance.__dict__.copy()
         return copy
 
+    @staticmethod
+    def get_info(obj, name, default=None):
+        try:
+            return getattr(obj, f"#{name}")
+        except AttributeError as e:
+            if default is None:
+                raise AttributeError(*e.args) from None
+            return default
+
+    @staticmethod
+    def set_info(obj, name, value):
+        setattr(obj, f"#{name}", value)
+        return obj
+
