@@ -6,6 +6,7 @@ Important:
 import contextlib
 import io
 import os
+import pickle
 import sys
 
 from .._typing import *
@@ -107,7 +108,7 @@ class ProcessStartOptions:
 
 def start_new_process(command, options):
     """
-    Start new process.
+    Start a new process.
     Returns (process_info, thread_info, pipes);  where:
 
     - process_info is a tuple of process id, process handle and process standard io
@@ -242,7 +243,6 @@ def read_descr(descr, size):
 def write_descr(descr, data):
     return _winapi.WriteFile(descr, data)
 
-
 def terminate_process(pid):
     """
     Attempt to terminate a process.
@@ -280,14 +280,14 @@ def get_current_process():
 
 
 def get_process_exit_code(pid):
+    hproc = _winapi.OpenProcess(0x0400, True, pid)
     try:
-        if pid not in _all_processes:
-            hproc = _winapi.OpenProcess(0, True, pid)
-        else:
-            hproc = _all_processes[pid]
-
         ecode = _winapi.GetExitCodeProcess(hproc)
-        return STILL_ACTIVE if ecode == _winapi.STILL_ACTIVE else ecode
     except OSError as e:
         raise ProcessLookupError(*e.args) from None
+    finally:
+        _winapi.CloseHandle(hproc)
+
+    return STILL_ACTIVE if ecode == _winapi.STILL_ACTIVE else ecode
+
 

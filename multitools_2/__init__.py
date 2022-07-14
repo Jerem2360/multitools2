@@ -1,3 +1,8 @@
+import sys
+
+if sys.version_info < (3, 10):
+    raise NotImplementedError("Minimal Python version supported by multitools is 3.10.")
+
 from importlib import util as _u
 
 from ._const import *
@@ -32,13 +37,14 @@ class _MultitoolsSubModuleFinder:
             _add_on_exit(name, mod.__finalize__)
             del mod.__finalize__
 
+        # noinspection PyTypeChecker
         sys.meta_path.insert(0, _MultitoolsSubModuleFinder)  # restore our pathfinder.
         return mod_spec
 
 
 import sys
 
-
+# noinspection PyTypeChecker
 sys.meta_path.insert(0, _MultitoolsSubModuleFinder)
 
 

@@ -1,3 +1,5 @@
+import _thread
+
 from ._local import *
 from ._const import *
 
@@ -13,6 +15,9 @@ class MultiMeta(type):
         cls.__module__ = f"{GLOBAL_NAME}.{sub}"
         return cls
 
+    def __getitem__(cls, item):
+        pass
+
     @staticmethod
     def copy(instance, *newargs, **newkwargs):
         """
@@ -24,15 +29,29 @@ class MultiMeta(type):
 
     @staticmethod
     def get_info(obj, name, default=None):
+        lock = getattr(obj, f"#{name}:lock")
+        lock.acquire(blocking=True)
         try:
             return getattr(obj, f"#{name}")
         except AttributeError as e:
             if default is None:
                 raise AttributeError(*e.args) from None
             return default
+        finally:
+            lock.release()
 
     @staticmethod
     def set_info(obj, name, value):
+        if not hasattr(obj, f"#{name}:lock"):
+            setattr(obj, f"#{name}:lock", _thread.allocate_lock())
+
+        lock = getattr(obj, f"#{name}:lock")
+        lock.acquire(blocking=True)
         setattr(obj, f"#{name}", value)
+        lock.release()
         return obj
+
+    @staticmethod
+    def has_info(obj, name):
+        return f'#{name}' in object.__dir__(obj)
 

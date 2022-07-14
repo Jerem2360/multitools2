@@ -289,7 +289,7 @@ class Process(metaclass=MultiMeta):
             res._pipes = pipes
 
             res._pstate_expected = STATE_RUNNING
-            if not res._daemon:
+            if not res._daemon:   # here
                 _blocking_processes.append(res)
             old_threads = MultiMeta.get_info(res, 'all_threads')
             primary_thread = th_info[0]
@@ -315,9 +315,10 @@ class Process(metaclass=MultiMeta):
         res._is_being_called = False
         self._is_being_called = False
 
-        for i in range(1000):
+        """for i in range(1000):
             print(str(_winapi.ReadFile(pipes[2], 100)[0], encoding=DEFAULT_ENCODING).replace('\n', ''),
                   file=sys.stderr)
+        """
 
         return res
 
@@ -398,7 +399,7 @@ class Process(metaclass=MultiMeta):
             state = self._get_pstate()
             if state == STATE_INITIALIZED:
                 raise ProcessStateError("Process models cannot be terminated.") from None
-            if state == STATE_FINALIZED:
+            if state == STATE_TERMINATED:
                 return True
         return _imp.terminate_process(MultiMeta.get_info(self, 'pid'))
 
@@ -409,7 +410,7 @@ class Process(metaclass=MultiMeta):
         state = self._get_pstate()
         if state == STATE_INITIALIZED:
             raise ProcessStateError("Process models cannot be killed.") from None
-        if state == STATE_FINALIZED:
+        if state == STATE_TERMINATED:
             return True
         return _imp.kill_process(MultiMeta.get_info(self, 'pid'))
 
@@ -442,7 +443,7 @@ class Process(metaclass=MultiMeta):
             return STATE_INITIALIZED
         if self._exit_status() == _imp.STILL_ACTIVE:
             return STATE_RUNNING
-        return STATE_FINALIZED
+        return STATE_TERMINATED
 
     def _read_data_from_child(self):
         stdin = io.open(self._pipes[0], closefd=False, mode='br')
@@ -464,6 +465,9 @@ class Process(metaclass=MultiMeta):
 
     def _open_child_thread(self, tid):
         pass
+
+    def exit_code_process(self):
+        return _imp.get_process_exit_code(MultiMeta.get_info(self, 'pid'))
 
     pid = property(lambda self: MultiMeta.get_info(self, 'pid', 0))
     state = property(lambda self: self._get_pstate())

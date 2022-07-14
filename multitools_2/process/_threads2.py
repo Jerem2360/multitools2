@@ -1,3 +1,5 @@
+import os
+
 from .._meta import *
 from .._const import *
 from .._errors import *
@@ -40,6 +42,7 @@ class Thread(metaclass=MultiMeta):
         self._id = _id
         self._running = (_tstate != STATE_INITIALIZED)
         self._is_being_called = False
+        self._lock = _thread.allocate_lock()
 
         self.__code__ = target.__code__
         self.__kwdefaults__ = target.__kwdefaults__
@@ -67,13 +70,46 @@ class Thread(metaclass=MultiMeta):
         self._invoke_list = []
 
     def __call__(self, *args, **kwargs):
+        if self._tstate != STATE_INITIALIZED:
+            raise ThreadStateError(expected=STATE_INITIALIZED, got=self._tstate)
         while self._is_being_called:
             pass
 
         self._is_being_called = True
         res = MultiMeta.copy(self)
 
-        # to do start the thread ...
+        if not res._lock.acquire(False, 1):
+            raise ThreadLockError("Thread's lock was unexpectedly stolen by another thread.")
+        res._lock.release()
+
+        def threadstart():
+            try:
+                if not res._lock.acquire(False, 1):
+                    raise ThreadLockError("Thread's lock was unexpectedly stolen by another thread.") from None
+                MultiMeta.set_info(res, 'running', True)
+
+                result = res._target(self, *args, **kwargs)
+                MultiMeta.set_info(res, 'result', result)
+                MultiMeta.set_info(res, 'running', False)
+
+                res._lock.release()
+
+            except:
+                if sys.exc_info()[0] == SystemExit:
+                    MultiMeta.set_info(res, 'exc_info', (True, 0, None, None, None))
+                    return
+
+                sys.stderr.write(f"Exception ignored in thread {self._id} ({hex(self._id)}):")
+                sys.excepthook(*sys.exc_info())
+                MultiMeta.set_info(res, 'exc_info', (True, 1, *sys.exc_info()))
+                return
+            MultiMeta.set_info(res, 'exc_info', (True, 0, None, None, None))
+
+        MultiMeta.set_info(res, 'result', None)
+        MultiMeta.set_info(res, 'exc_info', (False, 0, None, None, None))
+
+        _thread.start_new_thread(threadstart, (), kwargs={})
+        res._id = _thread.get_native_id()
 
         res._is_being_called = False
         self._is_being_called = False
@@ -120,4 +156,20 @@ class Thread(metaclass=MultiMeta):
         self.__name__ = self._target.__name__
         self.__qualname__ = self._target.__qualname__
 
+
+    def join(self):
+        if self._id == _thread.get_native_id():
+            raise ThreadError("A thread cannot join itself.")
+        if not self._lock.locked():
+            return self._tstate != STATE_INITIALIZED
+        self._lock.acquire(blocking=True)
+        self._lock.release()
+        return True
+
+    def exc_info(self):
+        return MultiMeta.get_info(self, 'exc_info')
+
+    process = property(lambda self: self._owner_process)
+    running = property(lambda self: MultiMeta.get_info(self, 'running'))
+    id = property(lambda self: self._id)
 

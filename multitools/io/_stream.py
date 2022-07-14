@@ -70,7 +70,7 @@ class TextInput(IStream, metaclass=MultiMeta):
     def __read__(self, size, encoding=None):
         typecheck(encoding, (str, type(None)), target_name="encoding")
         typecheck(size, (int,), target_name="size")
-        return self._handle.read(size, encoding=encoding)
+        return self._handle.read()
 
 
 class TextIO(TextOutput, TextInput, metaclass=MultiMeta):
@@ -100,7 +100,7 @@ class BytesInput(IStream, metaclass=MultiMeta):
 
     def __read__(self, size, **kwargs):
         typecheck(size, (int,), target_name="size")
-        return self._handle.read(size, **kwargs)
+        return self._handle.read()
 
 
 class BytesIO(BytesOutput, BytesInput, metaclass=MultiMeta):
@@ -135,11 +135,11 @@ class FileInput(IStream, metaclass=MultiMeta):
     def __read__(self, size, encoding=None):
         typecheck(encoding, (str, type(None)), target_name="encoding")
         typecheck(size, (int,), target_name="size")
-        return self._handle.read(size, encoding=encoding)
+        return self._handle.read()
 
     def readline(self, encoding=None):
         typecheck(encoding, (str, type(None)), target_name="encoding")
-        return self._handle.readline(encoding=encoding)
+        return self._handle.readline()
 
     fileno = property(lambda self: self._handle.fd)
     closed = property(lambda self: self._handle.closed)

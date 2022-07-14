@@ -7,6 +7,17 @@ from typing import Callable
 from ._local import *
 
 
+# platform-related constants:
+MS_WINDOWS = (sys.platform == "win32")
+ANDROID = hasattr(sys, 'getandroidapilevel')
+
+
+if MS_WINDOWS:
+    from ._win32 import getpid as _getpid
+else:
+    from os import getpid as _getpid
+
+
 __all__ = [
     "ANDROID",
     "MS_WINDOWS",
@@ -21,6 +32,7 @@ __all__ = [
 
     "MODNAME_EXTERNAL",
     "MODNAME_PROCESS",
+    "MODNAME_IO",
 
     "NO_OP_READER",
     "NO_OP_WRITER",
@@ -38,9 +50,13 @@ __all__ = [
 
     "STATE_INITIALIZED",
     "STATE_RUNNING",
-    "STATE_FINALIZED",
+    "STATE_TERMINATED",
     "MAIN_THREAD_ID",
     "MAIN_PROCESS_ID",
+    "MAIN_PROC_ENV_NAME",
+    "RESERVED_PROCESSES",
+    "ENV_PROCS",
+    "ENV_PY_PROCS",
     "CALL_WAIT_TIMEOUT",
 
     "EVENT_CALL",
@@ -70,9 +86,7 @@ GLOBAL_NAME = 'multitools_2'
 GLOBAL_PATH = __file__.removesuffix('/_const.')
 
 
-# platform-related constants:
-MS_WINDOWS = (sys.platform == "win32")
-ANDROID = hasattr(sys, 'getandroidapilevel')
+
 
 SHELL = os.environ.get('COMSPEC', 'cmd.exe') if MS_WINDOWS else '/system/bin/sh' if ANDROID else '/bin/sh'
 
@@ -133,6 +147,8 @@ del f
 # submodule names:
 MODNAME_EXTERNAL = GLOBAL_NAME + '.external'
 MODNAME_PROCESS = GLOBAL_NAME + '.process'
+MODNAME_IO = GLOBAL_NAME + '.io'
+MODNAME_RUNTIME = GLOBAL_NAME + '.runtime'
 
 # functions that do nothing:
 _no_op = 'no_op'
@@ -163,12 +179,17 @@ DLLIMPORT_FROM_NAME = GLOBAL_NAME + '.dll'
 # thread-related constants:
 STATE_INITIALIZED = 0
 STATE_RUNNING = 1
-STATE_FINALIZED = 2
+STATE_TERMINATED = 2
 MAIN_THREAD_ID = _thread.get_ident()  # we are supposedly in the main thread
 CALL_WAIT_TIMEOUT = 2
 
 # process-related constants:
-MAIN_PROCESS_ID = os.getpid()  # we are supposedly in the main process
+MAIN_PROC_ENV_NAME = GLOBAL_NAME + ':MAIN_PROC'
+# small trick to always have the main process' id (See file 'runtime/_process.py' for details):
+MAIN_PROCESS_ID = int(os.environ.get(MAIN_PROC_ENV_NAME, str(_getpid())))
+RESERVED_PROCESSES = (0, 4)  # processes that cannot be opened.
+ENV_PROCS = GLOBAL_NAME + '_PROCS'
+ENV_PY_PROCS = GLOBAL_NAME + '_PY_PROCS'
 
 # event-related constants:
 EVENT_CALL = 'call'

@@ -1,3 +1,9 @@
+import _thread
+import os
+
+from ._const import *
+
+import _io
 
 
 def defined(name):
@@ -52,7 +58,26 @@ def customName(name):
         return x
     return _wrap
 
-def object_info(name) -> property:
-    def _getter(self, *args, **kwargs):
-        return
+
+class Synchronizer:
+    """
+    Primitives that allow thread-safe code execution by disallowing
+    multiple of their executions to run at the same time.
+    """
+    def __init__(self, timeout=-1):
+        self._lock = _thread.allocate_lock()
+        self._timeout = timeout
+
+    def __enter__(self):
+        self._lock.acquire(blocking=True, timeout=self._timeout)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._lock.release()
+
+
+def nullbytes(size):
+    res = b''
+    for i in range(size):
+        res += b'\x00'
+    return res
 

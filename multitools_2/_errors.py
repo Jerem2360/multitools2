@@ -6,6 +6,11 @@ POS_ARGCOUNT_ERR_STR = "{0} accepts {1} positional argument(s), but {2} were giv
 
 
 def _NoPath(error):
+    """
+    Removes the path of the given object on display.
+    For exceptions, their dotted path will no longer be displayed
+    when raised.
+    """
     error.__module__ = "builtins"
     return error
 
@@ -77,7 +82,12 @@ class ThreadStateError(ThreadError):
 
 
 @_NoPath
-class ProcessError(BaseException):
+class ThreadLockError(ThreadError):
+    pass
+
+
+@_NoPath
+class ProcessError(RuntimeError):
     pass
 
 
@@ -102,4 +112,9 @@ class OutOfScopeError(ProcessLookupError):
             super().__init__(*args)
             return
         super().__init__("Target is out of scope of this process.")
+
+
+@_NoPath
+class UnsupportedOperation(OSError):
+    pass
 

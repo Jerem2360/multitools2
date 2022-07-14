@@ -118,7 +118,7 @@ class Thread(metaclass=MultiMeta):
 
     @property
     def __result__(self):
-        if self.__tstate__ == STATE_FINALIZED:
+        if self.__tstate__ == STATE_TERMINATED:
             return self._get_info('result')
         raise ThreadStateError("Thread has not finished executing.")
 
@@ -257,7 +257,7 @@ class Thread(metaclass=MultiMeta):
         """
         if self.__tstate__ != STATE_INITIALIZED:
             raise ThreadStateError(expected=STATE_INITIALIZED, got=self.__tstate__)
-
+        # here
         if self.__join_lock__ is None:
             raise PermissionError("Access denied.")
 
@@ -278,7 +278,7 @@ class Thread(metaclass=MultiMeta):
             self.__join_lock__.acquire()
             self.__join_lock__.release()
             return
-        while self.__tstate__ != STATE_FINALIZED:
+        while self.__tstate__ != STATE_TERMINATED:
             time.sleep(0.5)
         return
 
@@ -297,7 +297,7 @@ class Thread(metaclass=MultiMeta):
         if hasattr(function, '__code__') and function.__code__.co_argcount != 3:
             raise TypeError(TYPE_ERR_STR.format('(FrameType, str, Any) -> function', type(function).__name__))
 
-        if self.__tstate__ == STATE_FINALIZED:
+        if self.__tstate__ == STATE_TERMINATED:
             return
 
         self._tracefunc = function
@@ -326,7 +326,7 @@ class Thread(metaclass=MultiMeta):
         elif _res == NULL_BYTE:
             exc_info = _distant_exc_info(self._reach['write'], self._reach['read'])
             res = MultiMeta.copy(self)
-            res.__tstate__ = STATE_FINALIZED
+            res.__tstate__ = STATE_TERMINATED
             res._exc_info = exc_info
             return res
 
@@ -355,7 +355,7 @@ class Thread(metaclass=MultiMeta):
                 sys.excepthook(*sys.exc_info())
 
             res._exc_info = exc_info
-            res.__tstate__ = STATE_FINALIZED
+            res.__tstate__ = STATE_TERMINATED
             res._running = False
             res._unrecord()
             res.__join_lock__.release()
@@ -439,7 +439,7 @@ class Thread(metaclass=MultiMeta):
         return True
 
     def _get_result(self):
-        if self.__tstate__ == STATE_FINALIZED:
+        if self.__tstate__ == STATE_TERMINATED:
             return self._get_info('result')
         raise ThreadStateError("Thread has not finished executing.")
 

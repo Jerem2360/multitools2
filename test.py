@@ -1,23 +1,24 @@
+import io
 import os
-import pickle
 import sys
 import time
+import pickle
+import _thread
 
-from multitools_2 import process
 
+from multitools_2.runtime import _process2
 
-print("creating f() ...")
-@process.Process
-def f(proc=None):
-    sys.stderr.write(repr(proc))
-    time.sleep(2)
-    pass
+def f(*args, **kwargs): ...
 
-print(f)
+test1 = _process2.Process('echo')
+test2 = _process2.Process(f)
+test3 = _process2.Process()
+# print(test3.pid)
+# test4 = _process2.Process(1234555666667)
+print(test2._build_code((0, 1, 3), (), {}))
 
-print("created f() ...")
-run = f()
-print(run)
-print("called f() ...")
-time.sleep(3)
+print(test1)
+print(test2)
+print(test3)
+
 

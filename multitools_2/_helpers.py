@@ -1,24 +1,184 @@
 import sys
 import pickle
 import types
+import marshal
 
 
-def _get_sysmodules_names():
-    names = []
-    for name in sys.modules.keys():
-        names.append(name)
-    return tuple(names)
+### -------- Basic classes to sort values on reference fixing when pickling and unpickling functions -------- ###
 
+class _BltnInfo:
+    """
+    Basic class to indicate that a name required by a function
+    resides inside the 'builtins' module.
+    """
+    def __init__(self, name='print'):
+        self._name = name
+
+    def __restore__(self):
+        if self._name in globals():
+            return globals()[self._name]
+        import builtins
+        return getattr(builtins, self._name)
+
+    def __getstate__(self):
+        return {'name': self._name}
+
+    def __setstate__(self, state):
+        self._name = state['name']
+
+
+class _SysItemInfo:
+    """
+    Basic class to indicate that a name required by a function
+    resides inside the 'sys' module.
+    """
+    def __init__(self, name='version_info'):
+        self._name = name
+
+    def __restore__(self):
+        return getattr(sys, self._name)
+
+    def __getstate__(self):
+        return {'name': self._name}
+
+    def __setstate__(self, state):
+        self._name = state['name']
+
+
+class _ModInfo:
+    """
+    Basic class to fix an import from a function.
+    Also, this is handful because pickleable.
+    **Non-static modules are not supported.**
+    """
+    def __init__(self, module=None):
+        """
+        Save a module's info.
+        """
+        if module is None:
+            self._name = '<unknown>'
+            return
+        self._name = module.__name__
+        if module.__package__ != '':
+            if module.__package__.endswith(self._name):
+                self._name = module.__package__
+            else:
+                self._name = module.__package__ + '.' + self._name
+
+    @staticmethod
+    def _import(name):
+        """
+        Internal helper that stores the imported module
+        inside sys.modules if not already done.
+        """
+        # module has already been imported, return it:
+        if name in sys.modules:
+            return sys.modules[name]
+        # module has not already been imported, so we import it into the new namespace:
+        mod = __import__(name)
+        sys.modules[name] = mod   # save it in sys.modules, so it doesn't get imported multiple times in the same namespace.
+        return mod
+
+    def __import__(self):
+        """
+        Restore the previously saved module by importing it.
+        Returns the imported module.
+        """
+        # special case of '<unknown>':
+        if self._name == '<unknown>':
+            return None
+
+        # the module has already been imported in the new namespace:
+        if self._name in sys.modules:
+            return sys.modules[self._name]
+
+        # the module has a simple name with no dots, easy to import:
+        if '.' not in self._name:
+            return self._import(self._name)
+
+        # the module has a dotted name, import each node, one after the other:
+        self._import(self._name.split('.')[0])
+        for i in range(len(self._name.split('.')) - 1):
+            temp_name = self._name.split('.')[:i+1].join('.')
+            self._import(temp_name)
+        return self._import(self._name)
+
+    def __getstate__(self):
+        """
+        Helper for pickle.
+        """
+        return {'name': self._name}
+
+    def __setstate__(self, state):
+        """
+        Helper for pickle.
+        """
+        self._name = state['name']
+
+
+class _PickledObjInfo:
+    """
+    Basic class that stores a value in pickled form, which can
+    be restored later.
+    """
+    def __init__(self, obj=None):
+        if obj is None:
+            self._data = None
+            return
+        self._data = pickle.dumps(obj)
+
+    def __restore__(self):
+        if self._data is None:
+            return None
+        return pickle.loads(self._data)
+
+    def __getstate__(self):
+        return {'data': self._data}
+
+    def __setstate__(self, state):
+        self._data = state['data']
+
+### -------- Function pickling-related functions -------- ###
 
 def pickle_function(function, name: str):
+    """
+    Pickle a function as if it were any other type of standard
+    python object. Pickle doesn't do this by default, and does
+    name lookups only.
+    """
+    # special case where function is None:
+    if function is None:
+        return {f'{name}:name': None}
+
+    # list references needed by the function inside a dict:
     needed_globals = {}
     for _name in function.__code__.co_names:
-        if (_name not in dir(sys.modules['builtins'])) and (_name in function.__globals__):
-            try:
-                needed_globals[_name] = pickle.dumps(function.__globals__[_name]) if function.__globals__[_name] is not None else None
-            except:
-                needed_globals[_name] = None
+        # name was not found in the global scope of the function:
+        if _name not in function.__globals__:
+            needed_globals[_name] = None
+            continue
+        # name is a module that should be re-imported on unpickling:
+        if isinstance(function.__globals__[_name], type(sys)):
+            needed_globals[_name] = _ModInfo(function.__globals__[_name])
+            continue
+        # name resides in the sys module and should be re-imported on unpickling:
+        if hasattr(sys, _name):
+            needed_globals[_name] = _SysItemInfo(_name)
+            continue
+        # name is a builtin object and should be found in globals or re-imported from the builtins module:
+        import builtins
+        if hasattr(builtins, _name):
+            needed_globals[_name] = _BltnInfo(_name)
+            continue
+        # name might be pickleable, we should try:
+        try:
+            needed_globals[_name] = _PickledObjInfo(function.__globals__[_name])
+        except pickle.PicklingError:
+            # it turns out that name was not pickleable, and well, where else could we find the object? No idea.
+            # if the name turns out to be in globals() at function execution, the user is either lucky or smart.
+            needed_globals[_name] = None
 
+    # store every single attribute / sub-attribute of the function:
     result = {
         f'{name}:name': function.__name__,
         f'{name}:defaults': function.__defaults__,
@@ -39,7 +199,6 @@ def pickle_function(function, name: str):
         f'{name}:co_freevars': function.__code__.co_freevars,
         f'{name}:co_cellvars': function.__code__.co_cellvars,
         f'{name}:globals': needed_globals,
-        f'{name}:sys_modules': _get_sysmodules_names(),
     }
     if sys.version_info >= (3, 8):
         result[f'{name}:co_posonlyargcount'] = function.__code__.co_posonlyargcount
@@ -47,8 +206,17 @@ def pickle_function(function, name: str):
 
 
 def unpickle_function(state, name):
+    """
+    Unpickle a function as if it were of any type of standard
+    python object. Pickle doesn't do this by default.
+    """
     import sys
 
+    # special case where function was None:
+    if state[f'{name}:name'] is None:
+        return None
+
+    # restore the code of the function, and all of its attributes:
     code_args = [
         state[f'{name}:co_argcount'],
         state[f'{name}:co_kwonlyargcount'],
@@ -69,8 +237,8 @@ def unpickle_function(state, name):
     if sys.version_info >= (3, 8):
         code_args.insert(1, state[f'{name}:co_posonlyargcount'])
 
-
     function_code = types.CodeType(*code_args)
+    # restore the function itself, along with all of its attributes:
     function = types.FunctionType(
         function_code,
         globals(),
@@ -79,17 +247,143 @@ def unpickle_function(state, name):
         state[f'{name}:closure'],
     )
 
+    # fix any missing references needed by the function (if possible):
     glob = state[f'{name}:globals']
     for _name, value in glob.items():
-        if (_name not in globals()) and (_name in function.__code__.co_names):
-            globals()[_name] = pickle.loads(value) if value is not None else None
-
-    for required_module in state[f'{name}:sys_modules']:
-        if required_module in function.__code__.co_names:
-            if required_module not in sys.modules:
-                sys.modules[required_module] = __import__(required_module)
-            if (required_module not in globals()) or (globals()[required_module] is None):
-                globals()[required_module] = sys.modules[required_module]
+        # the referenced object was a module, re-import it:
+        if isinstance(value, _ModInfo):
+            globals()[_name] = value.__import__()
+            continue
+        # the referenced object was a builtin object, re-import it:
+        if isinstance(value, _BltnInfo):
+            globals()[_name] = value.__restore__()
+            continue
+        # the referenced object resides inside the sys module, re-import it:
+        if isinstance(value, _SysItemInfo):
+            globals()[_name] = value.__restore__()
+            continue
+        # the referenced object was found to be pickleable, therefore unpickling it would restore its value:
+        if isinstance(value, _PickledObjInfo):
+            globals()[_name] = value.__restore__()
+            continue
+        # well, at this point, we found all values we could restore, but a lucky user might reference a name
+        # already residing in globals()
+        if value is None:
+            pass
 
     return function
+
+
+def pickle_function2(function):
+    """
+    Like pickle_function(), but nearly twice as efficient.
+    bytes are nearly half of the length of that for pickle_function()
+    """
+    if function is None:
+        return None
+
+    # list references needed by the function inside a dict:
+    needed_globals = {}
+    for _name in function.__code__.co_names:
+        # name was not found in the global scope of the function:
+        if _name not in function.__globals__:
+            needed_globals[_name] = None
+            continue
+        # name is a module that should be re-imported on unpickling:
+        if isinstance(function.__globals__[_name], type(sys)):
+            needed_globals[_name] = _ModInfo(function.__globals__[_name])
+            continue
+        # name resides in the sys module and should be re-imported on unpickling:
+        if hasattr(sys, _name):
+            needed_globals[_name] = _SysItemInfo(_name)
+            continue
+        # name is a builtin object and should be found in globals or re-imported from the builtins module:
+        import builtins
+        if hasattr(builtins, _name):
+            needed_globals[_name] = _BltnInfo(_name)
+            continue
+        # name might be pickleable, we should try:
+        try:
+            needed_globals[_name] = _PickledObjInfo(function.__globals__[_name])
+        except pickle.PicklingError:
+            # it turns out that name was not pickleable, and well, where else could we find the object? No idea.
+            # if the name turns out to be in globals() at function execution, the user is either lucky or smart.
+            needed_globals[_name] = None
+
+    # store every single attribute of the function:
+    result = {
+        'name': function.__name__,
+        'defaults': function.__defaults__,
+        'closure': function.__closure__,
+        'code': marshal.dumps(function.__code__),  # marshalling the function's code optimizes the size of the data.
+        'globals': needed_globals,
+        '__is_function': True
+    }
+    if sys.version_info >= (3, 8):
+        result['co_posonlyargcount'] = function.__code__.co_posonlyargcount
+
+    return pickle.dumps(result)
+
+
+def unpickle_function2(state):
+    """
+    Like unpickle_function(), but nearly twice as efficient.
+    bytes are nearly half of the length of that for unpickle_function()
+    """
+    data = pickle.loads(state)
+    code = marshal.loads(data['code'])
+
+    function = types.FunctionType(
+        code,
+        globals(),
+        data['name'],
+        data['defaults'],
+        data['closure'],
+    )
+
+    glob = data['globals']
+    for _name, value in glob.items():
+        # the referenced object was a module, re-import it:
+        if isinstance(value, _ModInfo):
+            globals()[_name] = value.__import__()
+            continue
+        # the referenced object was a builtin object, re-import it:
+        if isinstance(value, _BltnInfo):
+            globals()[_name] = value.__restore__()
+            continue
+        # the referenced object resides inside the sys module, re-import it:
+        if isinstance(value, _SysItemInfo):
+            globals()[_name] = value.__restore__()
+            continue
+        # the referenced object was found to be pickleable, therefore unpickling it would restore its value:
+        if isinstance(value, _PickledObjInfo):
+            globals()[_name] = value.__restore__()
+            continue
+        # well, at this point, we found all values we could restore, but a lucky user might reference a name
+        # already residing in globals()
+        if value is None:
+            pass
+
+    return function
+
+### -------- Other miscellaneous functions -------- ###
+
+
+def metaclassof(op) -> type[type]:
+    """
+    Return the metaclass of op.
+    """
+    if isinstance(op, type):
+        return op.__class__
+    return op.__class__.__class__
+
+
+def print_stacktrace(exception):
+    """
+    Print a stacktrace for the provided exception object in the current frame.
+    """
+    try:
+        raise exception
+    except:
+        sys.excepthook(*sys.exc_info())
 
