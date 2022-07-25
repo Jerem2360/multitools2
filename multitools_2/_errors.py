@@ -5,6 +5,14 @@ ATTRIB_ERR_STR = "'{0}' object has no attribute '{1}'."
 POS_ARGCOUNT_ERR_STR = "{0} accepts {1} positional argument(s), but {2} were given."
 
 
+def change_error(new_error):
+    last_error = sys.exc_info()[1]
+    new_error.__cause__ = last_error.__cause__
+    new_error.__context__ = last_error.__context__
+    new_error.__traceback__ = last_error.__traceback__
+    return new_error
+
+
 def _NoPath(error):
     """
     Removes the path of the given object on display.

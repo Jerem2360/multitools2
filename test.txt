@@ -1,1 +1,8 @@
-blah
+- del:
+self._find_lid_in_processes
+self._add_to_processes
+self._get_process_state
+self._update_process_state
+
+- edit:
+self._get_state

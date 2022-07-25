@@ -230,7 +230,6 @@ def start_new_process(command, options):
 
     startupinfo = startupinfo.copy()
 
-
     attribute_list = startupinfo.lpAttributeList
     have_handle_list = bool(attribute_list and "handle_list" in attribute_list and attribute_list["handle_list"])
 
@@ -254,7 +253,6 @@ def start_new_process(command, options):
     else:
         flags |= _win32.CREATE_NEW_CONSOLE
 
-
     if have_handle_list or (use_std_handles and close_fds):
         if attribute_list is None:
             attribute_list = startupinfo.lpAttributeList = {}
@@ -263,7 +261,6 @@ def start_new_process(command, options):
         if use_std_handles:
             # noinspection PyUnboundLocalVariable
             handle_list += [int(proc_stdin_called), int(proc_stdout_called), int(proc_stderr_called), int(called_exc_info_pipe)]
-
 
     try:
         process_handle, thread_handle, process_id, thread_id = _winapi.CreateProcess(

@@ -1,24 +1,12 @@
-import io
-import os
+# noinspection PyProtectedMember
+from multitools_2 import io
 import sys
-import time
-import pickle
-import _thread
 
 
-from multitools_2.runtime import _process2
+print(io.Stream(sys.stdout))
 
-def f(*args, **kwargs): ...
 
-test1 = _process2.Process('echo')
-test2 = _process2.Process(f)
-test3 = _process2.Process()
-# print(test3.pid)
-# test4 = _process2.Process(1234555666667)
-print(test2._build_code((0, 1, 3), (), {}))
+"""mem = _shared_memory2.SharedMemory(create=True)
 
-print(test1)
-print(test2)
-print(test3)
-
+print(mem.contents)"""
 

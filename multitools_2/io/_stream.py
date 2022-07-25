@@ -22,15 +22,20 @@ class Stream(metaclass=MultiMeta):
 
         if name is None:
             if isinstance(self._source, int):
-                name = str(self._source)
+                name = str(int(self._source))
             else:
                 name = self._source.name if hasattr(self._source, 'name') else str(self._source.fileno())
 
         # noinspection PyUnresolvedReferences
         if isinstance(self._source, _io._TextIOBase):
             self._raw_datatype = str
+            self._readable = self._source.readable()
+            self._writable = self._source.writable()
         elif isinstance(self._source, (_io._IOBase, int)):
             self._raw_datatype = bytes
+            if isinstance(self._source, _io._IOBase):
+                self._readable = self._source.readable()
+                self._writable = self._source.writable()
         else:
             self._raw_datatype = bytes
 

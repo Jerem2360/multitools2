@@ -16,14 +16,12 @@ EMPTY = pickle.dumps({})
 
 def _pickle_obj(obj):
     if isinstance(obj, Function):
-        return pickle_function2(obj)
+        return b'Func' + pickle_function2(obj)
     return pickle.dumps(obj)
 
 
 def _unpickle_obj(pickled_data):
-    data = pickle.loads(pickled_data)
-    if isinstance(data, dict) and \
-            '__is_function' in data and data['__is_function']:
+    if pickled_data.startswith(b'Func'):
         return unpickle_function2(pickled_data)
     return pickle.loads(pickled_data)
 
@@ -49,6 +47,10 @@ def _add_n_trailing_null_bytes(data, n):
 
 
 class SharedDict:
+    """
+    Dictionaries that are stored in their own dedicated and
+    dynamically sized shared memory.
+    """
     pickle_raise = False
     """
     Used when the object gets unpickled and finds out that its memory no longer exists.
@@ -129,6 +131,7 @@ class SharedDict:
             header_contents = data_size_b + data_name_b
 
             self._header.close()
+            self._header.unlink()
             self._header = _SharedMemory(name=self._pre_header.name + ':head', create=True, size=len(header_contents))
             self._header.buf[:] = header_contents
 
@@ -256,8 +259,11 @@ class SharedDict:
         """
         with SYNC:
             data = self._get_data()
+            # print('[SharedMemory] setitem', key, value)
+            # print(self._get_data())
             data[key] = value
             self._set_data(data)
+            # print(self._get_data())
 
     def __delitem__(self, key):
         """

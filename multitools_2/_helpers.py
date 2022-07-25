@@ -1,7 +1,13 @@
+import _thread
+import random
 import sys
 import pickle
 import types
 import marshal
+import binascii
+
+
+from ._const import *
 
 
 ### -------- Basic classes to sort values on reference fixing when pickling and unpickling functions -------- ###
@@ -386,4 +392,124 @@ def print_stacktrace(exception):
         raise exception
     except:
         sys.excepthook(*sys.exc_info())
+
+
+def random_hex(length):
+    """
+    Create and return random bytes of given length.
+    """
+    binascii.hexlify(random.Random().randbytes(length)).decode('ascii')
+
+
+def nameof(identifier):
+    """
+    Create and return a name from a given identifier.
+    """
+    name = SHM_NAME_PREFIX + hex(identifier).removeprefix('0x')
+    if len(name) > SHM_SAFE_NAME_LENGTH:
+        raise OverflowError("Identifier too big.")
+    return name
+
+
+def match_length(data, length, trail=b'\x00'):
+    if len(data) > length:
+        return data[:length]
+    if len(data) < length:
+        diff = length - len(data)
+        for i in range(diff):
+            data += trail
+        return data
+    return data
+
+
+class Synchronizer:
+    """
+    A type that attaches to a given instance that supports the Synchronizing protocol.
+    It can lock, unlock and wait for the given instance, allowing to synchronize it
+    amongst multiple threads.
+
+    By default, this protocol supports threading.Lock instances.
+
+    To implement this protocol, it is recommended that the 'locked or not' state
+    is stored somewhere inside the instance. It is also required to implement the
+    __lock__() and __unlock__() methods as well as the readonly __locked__ property.
+    An optional __wait__() method can also be implemented.
+    """
+
+    def __new__(cls, *args, **kwargs):
+        """
+        Create and return a new Synchronizer object.
+        """
+        self = super().__new__(cls)
+        self._inst = _thread.allocate_lock()  # default value
+        return self
+
+    def __init__(self, instance):
+        """
+        Initialize a Synchronizer object, given an instance to attach to.
+        """
+        if (hasattr(instance, '__lock__') and hasattr(instance, '__unlock__') and hasattr(instance, '__locked__')) or \
+                isinstance(instance, _thread.LockType):
+            self._inst = instance
+            return
+        raise TypeError("The type of the given instance does not support the Synchronization protocol.")
+
+    def _get_locked(self):
+        if isinstance(self._inst, _thread.LockType):
+            return self._inst.locked()
+        return self._inst.__locked__
+
+    def lock(self, *args, **kwargs):
+        """
+        Lock the underlying instance.
+        """
+        if isinstance(self._inst, _thread.LockType):
+            return self._inst.acquire(*args, **kwargs)
+        return self._inst.__lock__(*args, **kwargs)
+
+    def unlock(self):
+        """
+        Unlock the underlying instance.
+        """
+        if isinstance(self._inst, _thread.LockType):
+            return self._inst.release()
+        return self._inst.__unlock__()
+
+    def wait(self):
+        """
+        Wait until the instance is unlocked by another thread.
+        """
+        if isinstance(self._inst, _thread.LockType):
+            self._inst.acquire()
+            return self._inst.release()
+        if hasattr(self._inst, '__wait__'):
+            return self._inst.__wait__()
+        while True:
+            if not self._get_locked():
+                break
+
+    def __enter__(self):
+        """
+        Implement with self
+        """
+        if not isinstance(self._inst, _thread.LockType):
+            self.wait()
+        self.lock()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Implement with self
+        """
+        self.unlock()
+
+    def __reduce__(self):
+        """
+        Helper for pickle.
+        """
+        return (
+            self.__class__,
+            (self._inst,)
+        )
+
+    locked = property(lambda self: self._get_locked())
 

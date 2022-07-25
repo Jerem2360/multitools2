@@ -11,6 +11,7 @@ class MultiMeta(type):
         cls_mod_old = cls.__module__.split('.')
         if len(cls_mod_old) <= 2:
             return cls
+        cls.__real_module__ = cls.__module__
         sub = cls_mod_old[1]
         cls.__module__ = f"{GLOBAL_NAME}.{sub}"
         return cls

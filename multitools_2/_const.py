@@ -4,8 +4,6 @@ import _thread
 import pickle as _pickle
 from typing import Callable
 
-from ._local import *
-
 
 # platform-related constants:
 MS_WINDOWS = (sys.platform == "win32")
@@ -18,11 +16,20 @@ else:
     from os import getpid as _getpid
 
 
+def _CustomPath(value):
+    def _wrap(x):
+        x.__module__ = value
+        return x
+
+    return _wrap
+
+
 __all__ = [
     "ANDROID",
     "MS_WINDOWS",
 
     "SHELL",
+    "SHELL_OPT",
 
     "GLOBAL_NAME",
     "DEFAULT_ENCODING",
@@ -33,6 +40,11 @@ __all__ = [
     "MODNAME_EXTERNAL",
     "MODNAME_PROCESS",
     "MODNAME_IO",
+
+    "SHORT_TRUE",
+    "SHORT_FALSE",
+    "SHM_SAFE_NAME_LENGTH",
+    "SHM_NAME_PREFIX",
 
     "NO_OP_READER",
     "NO_OP_WRITER",
@@ -55,6 +67,7 @@ __all__ = [
     "MAIN_PROCESS_ID",
     "MAIN_PROC_ENV_NAME",
     "RESERVED_PROCESSES",
+    "ENV_THREADS",
     "ENV_PROCS",
     "ENV_PY_PROCS",
     "CALL_WAIT_TIMEOUT",
@@ -86,9 +99,8 @@ GLOBAL_NAME = 'multitools_2'
 GLOBAL_PATH = __file__.removesuffix('/_const.')
 
 
-
-
 SHELL = os.environ.get('COMSPEC', 'cmd.exe') if MS_WINDOWS else '/system/bin/sh' if ANDROID else '/bin/sh'
+SHELL_OPT = '/' if MS_WINDOWS else '-'
 
 
 def _as_named_func(func, module, name) -> Callable:
@@ -106,39 +118,9 @@ def _as_named_func2(func, name, set_) -> Callable:
     return func
 
 
-@customPath(GLOBAL_NAME)
-class _NullType:
-    __qualname__ = "NULL_t"
-
-    def __repr__(self):
-        return "NULL"
-
-    def __int__(self):
-        return 0
-
-    def __float__(self):
-        return 0.0
-
-    def __complex__(self):
-        return complex(0, 0)
-
-    def __str__(self):
-        return "NULL"
-
-    def __bytes__(self):
-        return b'\x00'
-
-    def __eq__(self, other):
-        tp = type(other)
-        if tp in (int, float, complex, bytes, str):
-            return other == tp(self)
-        return False
-
-
 # generic constants:
 DEFAULT_ENCODING = sys.getdefaultencoding()
 NULL_BYTE = b"\x00"
-NULL = _NullType()
 def f(): ...
 # noinspection PyUnresolvedReferences
 BUILTINS_DICT = f.__builtins__
@@ -180,14 +162,23 @@ DLLIMPORT_FROM_NAME = GLOBAL_NAME + '.dll'
 STATE_INITIALIZED = 0
 STATE_RUNNING = 1
 STATE_TERMINATED = 2
-MAIN_THREAD_ID = _thread.get_ident()  # we are supposedly in the main thread
 CALL_WAIT_TIMEOUT = 2
+
+# binary constants:
+SHORT_TRUE = (1).to_bytes(2, 'big', signed=False)
+SHORT_FALSE = (0).to_bytes(2, 'big', signed=False)
+
+# shared memory constants:
+SHM_SAFE_NAME_LENGTH = 14
+SHM_NAME_PREFIX = 'wnsm_' if MS_WINDOWS else '/psm_'
 
 # process-related constants:
 MAIN_PROC_ENV_NAME = GLOBAL_NAME + ':MAIN_PROC'
 # small trick to always have the main process' id (See file 'runtime/_process.py' for details):
 MAIN_PROCESS_ID = int(os.environ.get(MAIN_PROC_ENV_NAME, str(_getpid())))
+MAIN_THREAD_ID = _thread.get_native_id()
 RESERVED_PROCESSES = (0, 4)  # processes that cannot be opened.
+ENV_THREADS = GLOBAL_NAME + '_THREADS'
 ENV_PROCS = GLOBAL_NAME + '_PROCS'
 ENV_PY_PROCS = GLOBAL_NAME + '_PY_PROCS'
 
@@ -218,4 +209,36 @@ TPM_ERR_PERMISSION = "\x00P"
 def f(*args, **kwargs): ...
 NULL_CODE = f.__code__  # Code object that does nothing and accepts any arguments.
 del f
+
+
+@_CustomPath(GLOBAL_NAME)
+class _NullType:
+    __qualname__ = "NULL_t"
+
+    def __repr__(self):
+        return "NULL"
+
+    def __int__(self):
+        return 0
+
+    def __float__(self):
+        return 0.0
+
+    def __complex__(self):
+        return complex(0, 0)
+
+    def __str__(self):
+        return "NULL"
+
+    def __bytes__(self):
+        return b'\x00'
+
+    def __eq__(self, other):
+        tp = type(other)
+        if tp in (int, float, complex, bytes, str):
+            return other == tp(self)
+        return False
+
+
+NULL = _NullType()
 
