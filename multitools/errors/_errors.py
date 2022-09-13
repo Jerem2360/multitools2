@@ -13,6 +13,7 @@ from .._typeshed import *
 ATTR_ERR_STR = "'{0}' object has no attribute '{1}'."
 POS_ARGCOUNT_ERR_STR = "{0} accepts {1} positional argument(s), but {2} were given."
 TYPE_ERR_STR = "Expected type '{0}', got '{1}' instead."
+NOT_CALLABLE_ERR_STR = "'{0}' object is not callable."
 
 
 ### -------- Traceback customization machinery -------- ###

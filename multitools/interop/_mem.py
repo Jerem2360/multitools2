@@ -122,9 +122,9 @@ class _BufferWrapper:
 class Memory:
     """
     Provide a flat writable view on raw memory.
-    While it supports write access of most objects'
+    While it supports write access of most objects'0
     raw data, it comes with some limitations:
-    - it can only provide a view on python objects that support the buffer protocol
+    - it can only provide a view on python objects that support the buffer protocol (see the Buffer interface)
     - it cannot provide a view on read-only buffer objects
     - once the buffer is released, no operation can be done on the memory.
 
@@ -191,7 +191,8 @@ class Memory:
                 self._buf.release()
                 raise err_depth(type(old_err), *old_err.args, depth=1) from None
 
-            # self._view is guaranteed to be writable (see flags) and 1-dimensional:
+            # self._view is guaranteed to be writable (see flags) and 1-dimensional.
+            # self._view.itemsize is also guaranteed to be 1:
             self._view = mv
             return
 
@@ -239,15 +240,20 @@ class Memory:
             step = key.step if key.step is not None else 1
 
             mv = self._view[start:stop:step]
-            parse_args((value,), list[SupportsIndex], depth=1)
+            parse_args((value,), list[SupportsIndex] | bytes, depth=1)
+
             if len(value) != len(mv):
                 raise err_depth(ValueError, "value must have the same length as the memory slice.", depth=1)
-            value_b = b''
-            for i in value:
-                i = i.__index__()
-                if i >= 256:
-                    raise err_depth(OverflowError, f"Integer {i} too big to fit in one byte.", depth=1)
-                value_b += i.to_bytes(1, _DEFAULT_BYTEORDER)
+
+            if not isinstance(value, bytes):
+                value_b = b''
+                for i in value:
+                    i = i.__index__()
+                    if i >= 256:
+                        raise err_depth(OverflowError, f"Integer {i} too big to fit in one byte.", depth=1)
+                    value_b += i.to_bytes(1, _DEFAULT_BYTEORDER)
+            else:
+                value_b = value
             mv[:] = value_b
             return
 
@@ -306,6 +312,8 @@ class Memory:
     def view(self):
         """
         Return a memoryview object pointing to the memory.
+        The memoryview object will present the memory as
+        raw bytes (itemsize=1,ndim=1,len=len(self)).
         """
         self._ensure_alive(1)
         return self._view
@@ -330,4 +338,23 @@ class Memory:
         except:
             return 0
         return self._buf.buf
+
+    @property
+    def obj(self):
+        """
+        The object from which the memory was borrowed if it
+        is not owned, else None.
+        """
+        if self._buf is None:
+            return None
+
+        if self._buf.obj == 0:  # we check for a NULL pointer, which would mean no source object.
+            return None
+
+        try:
+            obj_ = ctypes.cast(self._buf.obj, ctypes.py_object)
+            return obj_.value
+        except:
+            return None
+
 

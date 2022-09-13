@@ -1,1 +1,5 @@
-1.0.9
+1.0.9s19
+- Added C floating point, integer, and character types to interop submodule
+- Added a structure base class and pointer types to interop submodule
+- Added some structs from the C api in interop submodule
+

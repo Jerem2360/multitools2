@@ -21,6 +21,7 @@ __all__ = [
     "_EXEFILE",
 
     "_NOOP",
+    "_NOOP_CODE",
     "_NUL_B",
 
     "_debug",
@@ -58,6 +59,12 @@ _NOOP.__name__ = 'no_op'
 _NOOP.__qualname__ = _LIB_NAME + '.no_op'
 _NOOP.__module__ = _LIB_NAME
 _NUL_B = b'\x00'
+
+def _NOOP_CODE(doc=False):
+
+    return _NOOP.__code__.replace(
+        co_code=(b"d\x01S\x00" if doc else b"d\x00S\x00")
+    )
 
 
 ### -------- Stuff to do when loading the library -------- ###

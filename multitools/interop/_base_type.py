@@ -1,293 +1,272 @@
-import ctypes
-import ctypes as _ct
+import copy
+import struct
+import sys
 
+
+import _ctypes
+
+from ..errors import err_depth
 from .._meta import *
+from ._mem import Memory
 from .._typeshed import *
-from ..errors._errors import err_depth
 from .._parser import *
-from ..interface import Buffer, SupportsIndex
+from .._singleton import Singleton
 
 
-### -------- Constants -------- ###
-__BASE_TYPE__ = '__base_type__'
+"""
+class PyObject(Struct):
+#ifdef Py_TRACE_REFS  (NOT supported)
+    _ob_next: Pointer[PyObject]
+    _ob_prev: Pointer[PyObject]
+#endif
+    ob_refcnt: SSize_t
+    ob_type: Pointer[PyTypeObject]
+"""
 
 
-def _slice_assign(mv_dest, start, stop, step, mv_source):
-    n_dest = start
-    n_source = 0
-
-    while 1:
-        mv_dest[n_dest] = mv_source[n_source]
-        n_dest += step
-        n_source += 1
-        if (n_dest >= stop) or (n_source >= len(mv_source)):
-            break
-
-
-def _memoryview_from_memory(mv):
+@Singleton
+class NULL:
     """
-    Internal helper using the C api to create a memoryview
-    object of format 'B' exposing mv's data. If mv is deleted
-    before the result of this function, reading will cause
-    Access Violation.
+    Basic singleton that compares equal to zero and to null pointers.
+    Helpful when looking for null pointers and python object pointers.
     """
-    ptr = _buffer_get_pointer(mv)
-    size = mv.itemsize * len(mv)
-    flags = 0x200
+    def __eq__(self, other):
+        if other == 0:
+            return True
+        return super(type(self), self).__eq__(other)
 
-    c_res = ctypes.pythonapi.PyMemoryView_FromMemory(ctypes.c_void_p(ptr), ctypes.c_ssize_t(size), ctypes.c_int(flags))
-    res = ctypes.cast(c_res, ctypes.py_object).value
-    return res
+    def __ne__(self, other):
+        if other == 0:
+            return False
+        return super(type(self), self).__ne__(other)
 
+    def __index__(self):
+        return 0
 
-def _buffer_get_pointer(buf):
-    """
-    Internal helper using the C api to fetch the pointer of a
-    buffer object.
-    """
-    parse_args((buf,), Buffer, depth=1)
+    def __int__(self):
+        return 0
 
-    class _Py_Buffer(ctypes.Structure):
-        _fields_ = (
-            ("buf", ctypes.c_void_p),
-            ("obj", ctypes.c_void_p),
-            ("len", ctypes.c_ssize_t),
-            ("readonly", ctypes.c_int),
-            ("itemsize", ctypes.c_ssize_t),
-            ("format", ctypes.c_char_p),
-            ("ndim", ctypes.c_int),
-            ("shape", ctypes.c_void_p),
-            ("strides", ctypes.c_void_p),
-            ("suboffsets", ctypes.c_void_p),
-            ("internal", ctypes.c_void_p),
-        )
+    def __float__(self):
+        return 0.0
 
-    data = _Py_Buffer()
-    ctypes.pythonapi.PyObject_GetBuffer(ctypes.py_object(buf), ctypes.byref(data), ctypes.c_int(0))
-    pointer = ctypes.c_ssize_t.from_address(ctypes.addressof(data)).value
-    ctypes.pythonapi.PyBuffer_Release(ctypes.byref(data))
-    return pointer
+    def __complex__(self):
+        return 0j
 
 
-class _MemoryBuffer(metaclass=MultiMeta):
-    """
-    Mutable memory with a fixed size.
-    """
-    def __init__(self, *args, **kwargs):
-        """
-        Allocate a new memory block.
-        MemoryBuffer(size: int) -> new memory block of the given size, filled with zeros
-        MemoryBuffer(source: Buffer) -> new memory block, copying data from source
-        """
-        self._data = bytearray(*args, **kwargs)
-        self._ndim = 1
-
-    def __repr__(self):
-        """
-        Implement repr(self)
-        """
-        return f"({' '.join(hex(i) for i in self._data)})"
-
-    def __bytes__(self):
-        """
-        Implement bytes(self)
-        """
-        return bytes(self._data)
-
-    def __iter__(self):
-        """
-        Implement iter(self)
-        """
-        self._iterno = 0
-        return self
-
-    def __next__(self):
-        """
-        Implement next(self)
-        """
-        if self._iterno >= len(self._data):
-            raise StopIteration
-        res = self._data[self._iterno]
-        self._iterno += 1
-        return res
-
-    def __len__(self):
-        """
-        Implement len(self)
-        Return the length in bytes of the memory block.
-        """
-        return len(self._data)
-
-    def __getitem__(self, item):
-        """
-        Implement self[item]
-        """
-        if isinstance(item, slice):
-            start = item.start if item.start is not None else 0
-            stop = item.stop if item.stop is not None else len(self)
-            step = item.step if item.step is not None else 1
-
-            return _MemoryBuffer(self.get_memory()[start:stop:step])
-
-        parse_args((item,), SupportsIndex, depth=1)
-        return self.get_memory()[item.__index__()]
-
-    def __setitem__(self, key, value):
-        """
-        Implement self[key] = value
-        """
-        if isinstance(key, slice):
-
-            parse_args((value,), Buffer, depth=1)
-            start = key.start if key.start is not None else 0
-            stop = key.stop if key.stop is not None else len(self)
-            step = key.step if key.step is not None else 1
-
-            if self._ndim != 1:
-                # memoryview does not support slice assign for 0-dimensional memory.
-                return _slice_assign(self.get_memory(), start, stop, step, memoryview(value))
-
-            mv = memoryview(value)
-            if len(mv) != ((stop / step) - start):
-                raise err_depth(ValueError, "Data length is different from slice length.", depth=1)
-            self.get_memory()[start:stop:step] = mv
-            return
-
-        parse_args((key, value), SupportsIndex, int, depth=1)
-        if value >= 256:
-            raise err_depth(OverflowError, "Value too big to be represented by a single byte. Limit is 255.", depth=1)
-        self.get_memory()[key.__index__()] = value
-
-    def __delitem__(self, key):
-        """
-        Implement del self[key]
-        """
-        if isinstance(key, slice):
-            start = key.start if key.start is not None else 0
-            stop = key.stop if key.stop is not None else len(self)
-            step = key.step if key.step is not None else 1
-
-            self.get_memory()[start:stop:step] = b'\x00' * ((stop / step) - start)
-            return
-
-        parse_args((key,), SupportsIndex, depth=1)
-        self.get_memory()[key] = 0
-
-    def __contains__(self, item):
-        """
-        Implement item in self
-        """
-        parse_args((item,), int, depth=1)
-        return item in (self._data if isinstance(self._data, bytearray) else self.get_memory())
-
-    def get_memory(self):
-        """
-        Return a memory view of self.
-        """
-        if isinstance(self._data, memoryview):
-            return self._data
-        return memoryview(self._data)
-
-    def free(self):
-        """
-        Free the allocated memory. This is done by the destructor.
-        """
-        return self.get_memory().release()
-
-    @classmethod
-    def from_view(cls, mv):
-        """
-        Return the memory buffer of the given memoryview object, which
-        must be writeable.
-        """
-        parse_args((mv,), memoryview)
-        if mv.readonly:
-            raise err_depth(TypeError, "Read-only memoryview object.", depth=1)
-        if (not mv.c_contiguous) or (mv.ndim not in (0, 1)):
-            raise err_depth(TypeError, "A C contiguous 0 or 1-dimensional view is required.", depth=1)
-        self = super().__new__(cls)
-        self._data = mv
-        self._ndim = mv.ndim
-        return self
-
-    @property
-    def size(self):
-        """
-        Number of bytes allocated in memory.
-        This includes the trailing NUL byte at the end of the
-        memory block.
-        """
-        # noinspection PyUnresolvedReferences
-        return self._data.__alloc__() if isinstance(self._data, bytearray) else (self.get_memory().nbytes + 1)
-
-    @property
-    def buffer(self):
-        """
-        A buffer pointing to the memory. Virtually, this can be any type of buffer.
-        """
-        return self._data
-
-    @property
-    def address(self):
-        """
-        The address of the beginning of the memory block.
-        """
-        return _buffer_get_pointer(self.get_memory())
+__TYPE__ = '__type__'
+__CTYPE_LE__ = '__ctype_le__'
+__CTYPE_BE__ = '__ctype_be__'
 
 
 class CTypeMeta(MultiMeta):
-    """
-    Common metatype for all C data types.
-    """
-    def __new__(mcs, name, bases, np, **kwargs):
-        """
-        Create and return a new C data type.
-        """
-        if __BASE_TYPE__ not in np:
-            np[__BASE_TYPE__] = _ct.py_object  # base type defaults to ctypes.py_object
+    def __new__(mcs, name, bases, np):
+        custom_simple = Ellipsis
+        if '__simple__' in np:
+            custom_simple = copy.copy(np['__simple__'])
+            del np['__simple__']
 
-        cls = super().__new__(mcs, name, bases, np, **kwargs)
+        parse_args((custom_simple,), type(Ellipsis) | type(_ctypes._SimpleCData) | None, depth=1)
+
+        cls = super().__new__(mcs, name, bases, np)
+
+        cls._SimpleType = None
+        if custom_simple is not Ellipsis:
+            custom_simple.__name__ = cls.__name__ + '._SimpleType'
+            custom_simple.__qualname__ = cls.__qualname__ + '._SimpleType'
+            custom_simple.__module__ = cls.__module__
+            cls._SimpleType = custom_simple
+        cls._is_basetype = False
+        if hasattr(cls, __TYPE__):
+            struct_type = cls.__type__
+            cls.__type__ = struct_type
+            cls.__byteorder__ = '@'
+        else:
+            cls._is_basetype = True
+        cls._size = struct.calcsize(cls.__type__)
+
+        cls._little_endian_t = None
+        cls._big_endian_t = None
+        if cls.__type__ == '*' and cls._SimpleType is None:
+            raise err_depth(TypeError, "A C type that relies on the ctypes module must provide a source type.", depth=1)
+
+        if cls.__type__ == '*':
+            cls.__size__ = _ctypes.sizeof(cls._SimpleType)
+        else:
+            cls.__size__ = struct.calcsize(cls.__type__)
         return cls
+
+    def __repr__(cls):
+        return f"<C type {cls.__name__}>"
+
+    def with_byteorder(cls, byteorder):
+        if byteorder == 'little':
+            if cls._little_endian_t is not None:
+                return cls._little_endian_t
+
+            if cls.__type__ == '*':
+                res = cls.dup_shallow()
+                if not hasattr(cls._SimpleType, __CTYPE_LE__):
+                    cls._little_endian_t = res
+                    res._little_endian_t = res
+                    return cls._little_endian_t
+                res._SimpleType = cls._SimpleType.__ctype_le__
+                cls._little_endian_t = res
+                res._little_endian_t = res
+                return cls._little_endian_t
+
+            res = cls.dup_shallow()
+            res.__byteorder__ = '<'
+            cls._little_endian_t = res
+            res._little_endian_t = res
+            return cls._little_endian_t
+
+        if cls._big_endian_t is not None:
+            return cls._big_endian_t
+
+        if cls.__type__ == '*':
+            res = cls.dup_shallow()
+            if not hasattr(cls._SimpleType, __CTYPE_BE__):
+                cls._big_endian_t = res
+                res._big_endian_t = res
+                return cls._big_endian_t
+            res._SimpleType = cls._SimpleType.__ctype_be__
+            cls._big_endian_t = res
+            res._big_endian_t = res
+            return cls._big_endian_t
+        res = cls.dup_shallow()
+        res.__byteorder__ = '>'
+        cls._big_endian_t = res
+        res._big_endian_t = res
+        return cls._big_endian_t
+
+    @property
+    def __ctype__(cls):
+        return cls.__byteorder__ + cls.__type__
+
+    @property
+    def __simple__(cls):
+        """
+        For portability with ctypes.
+        A basic ctypes version of this type, in form of a _ctypes._SimpleCData subclass,
+        or a _ctypes.Structure subclass.
+        This is only defined if the equivalent of this type in ctypes inherits from
+        _ctypes._SimpleCData or _ctypes.Structure .
+        If overridden, this must be set to a base class of _ctypes._SimpleCData or _ctypes.Structure, None if
+        the type does not support __simple__, or Ellipsis '...' which maintains the default
+        behaviour; otherwise TypeError is raised.
+        """
+        if hasattr(cls, '_SimpleType'):
+            if cls._SimpleType is None:
+                raise err_depth(AttributeError, f"Class '{cls.__name__}' has no attribute '__simple__'.", depth=1)
+            return cls._SimpleType
+
+        _supports_byteorder = getattr(cls, '__supports_byteorder__', False)
+        _name = getattr(cls, '__simple_name__', cls.__name__ + '._SimpleType')
+        _type = getattr(cls, '__simple_type__', cls.__type__)
+
+        class SimpleType(_ctypes._SimpleCData):
+            _type_ = _type
+        if _supports_byteorder:
+            SimpleType.__ctype_le__ = cls.with_byteorder('little').__simple__
+            SimpleType.__ctypes_be__ = cls.with_byteorder('big').__simple__
+        SimpleType.__qualname__ = cls.__qualname__.replace(cls.__name__, _name)
+        SimpleType.__name__ = _name.split('.')[-1]
+        SimpleType.__module__ = cls.__module__
+
+        expected = struct.calcsize(cls.__ctype__)
+        got = _ctypes.sizeof(SimpleType)
+        if got != expected:
+            raise err_depth(SystemError, f"Invalid size for type '{cls.__name__}': expected {expected}, got {got} instead.", depth=1)
+
+        cls._SimpleType = SimpleType
+        return cls._SimpleType
+
+    def _map_fields(cls):
+        if cls.__type__ == '*':
+            fields = []
+            if not hasattr(cls, '__fields__'):
+                return ()
+            for k, v in cls.__fields__:
+                try:
+                    fields.append((k, v.__simple__))  # actually, 'Struct' should support __simple__
+                except AttributeError:
+                    raise err_depth(TypeError, "Structure fields must be of simple types or structure types.", depth=2)
+            return tuple(fields)
+        return ()
 
 
 class CType(metaclass=CTypeMeta):
     """
-    Base class for all C data types.
+    Common subclass for all C types.
+    In a C type's class body, multiple variables can be overridden:
+
+    - __type__ must be set to the struct format for the type or '*' if not supported.
+    - __simple__ allows to specify which ctypes type we rely on when __type__ is '*'
+    - __supports_byteorder__ allows to specify if the type depends on the byteorder. Defaults to False.
+    - __simple_name__ gives an optional custom name for the __simple__ attribute.
+    - __simple_type__ optionally provides an accurate struct format for the type if possible and in case __type__ is not accurate.
+
+    Note that upon class creation, __simple__ is copied and then stored as an object.
+    If __supports_byteorder__ is False, with_byteorder() will return an exact copy of cls.
+
+    Overriding the __init__ constructor of a CType subclass requires calling the __init__ constructor
+    of the super class.
+
+    These C types are made portable with the ctypes module by their class attribute __simple__
+    and their instance method __to_ctypes__()
+
+    __simple__, if supported, is a _ctypes._SimpleCData subclass that is equivalent to this C type.
+
+    The __to_ctypes__() instance method, returns a _ctypes._SimpleCData instance bound to the same
+    memory block as the current instance, and of the corresponding ctypes type.
     """
     def __new__(cls, *args, **kwargs):
-        """
-        Create and return new C data.
-        """
+        # C instances only have one attribute: a view on their assigned memory block called _data.
+        if cls._is_basetype:
+            raise err_depth(TypeError, "Abstract base class.", depth=1)
+
         self = super().__new__(cls)
+        self._args = ()
         return self
 
-    def __init__(self, data, *args, **kwargs):
-        """
-        Initialize new C data, given the data in python form.
-        """
-        self._buffer = type(self).__base_type__(data, *args, **kwargs)
+    def __init__(self, *values):
+        # positional arguments are passed in either to struct.pack or to the constructor of the ctypes type.
 
-    @classmethod
-    def from_buffer(cls, buf, offset=0):
-        """
-        Interpret a python buffer object as C data.
-        The buffer must be writable.
-        """
-        parse_args((buf, offset), Buffer, int, depth=1)
-        self = cls.__new__(cls)
-        self._buffer = cls.__base_type__.from_buffer(buf, offset=offset)
-        return self
+        if type(self).__type__ == '*':  # if the type relies on the ctypes module, wrap the ctypes instance
+            try:
+                self._data = Memory(type(self).__simple__(*values))
+            except AttributeError:  # the type does not support __simple__, then it's a structure.
+                class _Struct(_ctypes.Structure):
+                    _fields_ = type(self)._map_fields()
+                self._data = Memory(_Struct(*values))
+            except:
+                raise err_depth(sys.exc_info()[0], *sys.exc_info()[1].args, depth=1) from None
 
-    @classmethod
-    def from_buffer_copy(cls, buf, offset=0):
+        else:
+
+            self._data = Memory(struct.calcsize(type(self).__ctype__))
+            if len(values) != len(type(self).__type__):
+                raise err_depth(ValueError, f"Expected {len(type(self).__type__)} initializer arguments.", depth=1)
+
+            if len(values) > 0:
+                self._data[:] = struct.pack(type(self).__ctype__, *values)
+
+        self._args = values
+
+    def __repr__(self):
+        return f"<C {type(self).__name__}({', '.join(self._args)})>"
+
+    def __to_ctypes__(self):
         """
-        Same as from_buffer(), except that the buffer's data
-        is copied to a writeable buffer before the data is
-        interpreted. This de-synchronizes the buffer and the
-        C data object, allowing the buffer to be read-only.
+        Default implementation.
+        Returns None if cls does not support __simple__.
+        Otherwise, it calls the from_buffer() method of cls.__simple__
+        and returns its result.
         """
-        parse_args((buf, offset), Buffer, int, depth=1)
-        self = cls.__new__(cls)
-        self._buffer = cls.__base_type__.from_buffer_copy(buf, offset=offset)
-        return self
+        if self.__type__ == '*':
+            return self._data.obj  # the type wraps a ctypes type, so return the original ctypes instance.
+        try:
+            return type(self).__simple__.from_buffer(self._data.view())  # we own our memory, return a new ctypes instance.
+        except AttributeError:
+            return None
 

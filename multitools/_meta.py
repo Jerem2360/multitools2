@@ -7,6 +7,7 @@ __all__ = [
     "MultiMeta",
     "reversed_friendship",
     "generic",
+    "abstractmethod",
 ]
 
 
@@ -17,6 +18,7 @@ import copy
 from ._startup._debug import debugger
 from . import *
 from .errors._errors import *
+from ._tools import Decorator
 
 # debuggers:
 _D_MULTIMETA = debugger("MULTIMETA/debug")
@@ -31,6 +33,9 @@ __TEMPLATE__ = '__template__'
 __ORIGIN__ = '__origin__'
 __SUBCLASSHOOK__ = '__subclasshook__'
 __INSTANCEHOOK__ = '__instancehook__'
+__ISABSTRACTMETHOD__ = '__isabstractmethod__'
+__ISABSTRACT__ = '__isabstract__'
+__ABSTRACT__ = '__abstract__'
 __REVERSED__ = '@MultiMeta/friendship/reversed'
 __CREATION__ = '@MultiMeta/creation'
 
@@ -48,7 +53,8 @@ def reversed_friendship(cls):
     return cls
 
 
-def generic(*types):
+@Decorator
+def generic(cls, *types):
     """
     Allow a type to be generic and support template arguments,
     a bit like for typing.Generic. The main difference is that
@@ -68,17 +74,89 @@ def generic(*types):
             return res
 
     C[arg1, arg2, ...] -> generic 'C' with arguments arg1, arg2, ...
+
+    Note that template types are cached, so __template__ will
+    be called only once for each distinct set of template arguments.
     """
     if not _typecheck_template_type(types):
-        raise err_depth(TypeError, TYPE_ERR_STR.format('type | tuple[type, ...]', type(types).__name__), depth=1)
+        raise err_depth(TypeError, TYPE_ERR_STR.format('type | tuple[type, ...]', type(types).__name__), depth=2)
+    if not isinstance(cls, type):
+        # here depth is 2 because our function will be called by Decorator.__call__.<_inner>, adding a layer to the call stack.
+        raise err_depth(TypeError, TYPE_ERR_STR.format('type', type(cls).__name__), depth=2)
 
-    def _inner(cls):
-        if len(types) > 0:
-            cls.__generic__ = types
-            _D_MULTIMETA.print(f"Changed __generic__ of type '{cls.__name__}' to {types}.")
-            debugger.audit(f"{_LIB_NAME}.generic", *types)
-        return cls
-    return _inner
+    if len(types) > 0:
+        cls.__generic__ = types
+        _D_MULTIMETA.print(f"Changed __generic__ of type '{cls.__name__}' to {types}.")
+        debugger.audit(f"{_LIB_NAME}.generic", *types)
+    return cls
+
+
+def abstractmethod(func):
+    func.__isabstractmethod__ = True
+    return func
+
+
+### -------- Abstract method / field descriptors -------- ###
+
+
+class _AbstractField:
+    def __init__(self):
+        self.__isabstract__ = True
+
+    def __get__(self, instance, owner):
+        raise err_depth(TypeError, "Abstract field.", depth=1)
+
+    def __set__(self, instance, value):
+        raise err_depth(TypeError, "Abstract field.", depth=1)
+
+
+class _AbstractMethod:
+    def __init__(self, func):
+        """
+        Type representing bound abstract methods of types.
+        """
+        self._allow_instance_get = True
+        self._allow_class_get = True
+        if isinstance(func, (Function, Method)):
+            self.__func__ = _func_without_code(func)
+        if isinstance(func, classmethod):
+            # noinspection PyTypeChecker
+            self.__func__ = classmethod(_func_without_code(func.__func__))
+        if isinstance(func, staticmethod):
+            # noinspection PyTypeChecker
+            self.__func__ = staticmethod(_func_without_code(func.__func__))
+        if isinstance(func, property):
+            # noinspection PyTypeChecker
+            self.__func__ = property(
+                _func_without_code(func.fget),
+                _func_without_code(func.fset),
+                _func_without_code(func.fdel),
+                func.__doc__
+            )
+            self._allow_class_get = False
+            self._allow_instance_get = False
+
+        self._source = func
+        self.__code__ = None
+
+    def __get__(self, instance, owner):
+        if instance is not None:
+            if not self._allow_instance_get:
+                raise err_depth(TypeError, "Abstract method / field.", depth=1)
+            self.__self__ = instance
+        if not self._allow_class_get:
+            raise err_depth(TypeError, "Abstract method / field.", depth=1)
+        return self
+
+    def __call__(self, *args, **kwargs):
+        if not callable(self._source):
+            raise err_depth(TypeError, NOT_CALLABLE_ERR_STR.format(type(self._source).__name__), depth=1)
+        raise err_depth(TypeError, "Abstract method / field.", depth=1)
+
+    def __getattr__(self, item):
+        if hasattr(self.__func__, item):
+            return getattr(self.__func__, item)
+        raise err_depth(AttributeError, ATTR_ERR_STR.format(self.__class__.__name__, item), depth=1)
 
 
 ### -------- MultiMeta -------- ###
@@ -189,14 +267,47 @@ class MultiMeta(type):
     @generic(int, ..., float)
     class C(metaclass=MultiMeta): pass
     would accept 3 template arguments - an integer, whatever object, and a floating point number.
+
+    As explained earlier, types can also implement their own way of processing
+    template arguments, by defining the __template__ class method. It should accept
+    the appropriate template arguments as parameters, and return a copy of the type,
+    that can be changed as needed.
+    To copy the class, use the copy_shallow and copy_deep class methods.
+    copy.copy and copy.deepcopy can also be used to copy the class.
+    For more info, refer to their respective documentations.
+
+    Note that __template__ is called only once for each different template argument
+    combination: for performance and coherence purposes, template types are cached.
     """
     def __new__(mcs, name, bases, np, generic=None, friends=None, **kwargs):
         """
         Create and return a new type object.
         The 'friends' parameter allows specifying class friendship for types
         created by calling the metaclass.
+        The 'generic' can specify the type of template arguments the type accepts.
+        The @generic(...) decorator does the same.
         """
         debugger.audit(f'{_LIB_NAME}.MultiMeta.__new__', name, bases, np)
+
+        _abs = False
+        abs_attrs = []
+        _abstract_base = []
+        for b in bases:
+            abstract = getattr(b, __ABSTRACT__, False)
+            if abstract:
+                for elem in b.__abstracts__:
+                    _abstract_base.append(b.__name__ + '.' + elem)
+
+        for elem in _abstract_base:
+            cls, name = elem.split('.')
+            if name not in np:
+                abs_attrs.append(name)
+                _abs = True
+
+        for k, v in np.items():
+            if v is Ellipsis:
+                np[k] = _AbstractField()
+
         cls = super().__new__(mcs, name, bases, np)
         setattr(cls, __CREATION__, True)
         if not kwargs.get('_copy', False):
@@ -246,6 +357,22 @@ class MultiMeta(type):
 
         _D_MULTIMETA.print(f"-> friends are {cls.__friends__}.")
 
+        cls.__abstract__ = False
+        cls.__abstracts__ = abs_attrs
+
+        for k, v in cls.__dict__.items():
+            if getattr(v, __ISABSTRACTMETHOD__, False):
+                cls.__abstract__ = True
+                cls.__abstracts__.append(k)
+                if not isinstance(v, _AbstractMethod):
+                    setattr(cls, k, _AbstractMethod(v))
+            elif getattr(v, __ISABSTRACT__, False):
+                cls.__abstract__ = True
+                cls.__abstracts__.append(k)
+                if not isinstance(v, _AbstractField):
+                    setattr(cls, k, _AbstractField())
+
+        cls.__abstract__ = _abs or cls.__abstract__
         setattr(cls, __CREATION__, False)
 
         return cls
@@ -330,7 +457,7 @@ class MultiMeta(type):
         for i in range(len(args)):
             if cls.__generic__[i] is Ellipsis:
                 continue
-            if not isinstance(args[i], cls.__generic__[i]):
+            if not _typecheck_template(args[i], cls.__generic__[i]):
                 expected = ' | '.join(t.__name__ for t in cls.__generic__[i]) if isinstance(cls.__generic__[i], tuple) else cls.__generic__[i].__name__
                 raise err_depth(TypeError, TYPE_ERR_STR.format(cls.__generic__[i].__name__, type(args[i]).__name__), depth=1)
 
@@ -362,7 +489,7 @@ class MultiMeta(type):
             # noinspection PyUnresolvedReferences
             res = cls.__instancehook__(instance)
             if res is not NotImplemented:
-                return res
+                return super().__instancecheck__(instance)
 
         if not hasattr(cls, __ORIGIN__):
             return False
@@ -371,6 +498,7 @@ class MultiMeta(type):
 
     def __eq__(cls, other):
         if hasattr(cls, __ORIGIN__):
+            # noinspection PyUnresolvedReferences
             return (cls.__args__ == other.__args__) and (cls.__origin__ == other.__origin__)
         return super().__eq__(other)
 
@@ -381,6 +509,11 @@ class MultiMeta(type):
             if res is not NotImplemented:
                 return res
         return super().__subclasscheck__(subclass)
+
+    def __call__(cls, *args, **kwargs):
+        if cls.__abstract__:
+            raise err_depth(TypeError, "Abstract type.", depth=1)
+        return super().__call__(*args, **kwargs)
 
     def dup_shallow(cls):
         """
@@ -422,6 +555,9 @@ class MultiMeta(type):
         _D_COPY.print("Dispatching a new metatype...")
         copy.deepcopy.__globals__['_deepcopy_dispatch'][mcs] = mcs.deepcopy  # real location is copy._deepcopy_dispatch
         copy.copy.__globals__['_copy_dispatch'][mcs] = mcs.copy  # real location is copy._copy_dispatch
+
+    def _register_typ_cache(cls, args, tp):
+        cls._typecache[args] = tp
 
     @classmethod
     def copy(mcs, x):
@@ -512,4 +648,21 @@ def _build_template_list_repr(args):
         res.append(str(a))
 
     return tuple(res)
+
+
+def _func_without_code(func):
+    if not isinstance(func, (Function, Method)):
+        return func
+    tp = Function if isinstance(func, Function) else Method
+    return tp(_NOOP_CODE(), func.__globals__, func.__name__, func.__defaults__, func.__closure__)
+
+
+def _typecheck_template(arg, tp):
+    from ._parser import parse_args  # this is imported here to avoid circular import
+
+    try:
+        parse_args((arg,), tp)
+    except AttributeError:
+        return False
+    return True
 

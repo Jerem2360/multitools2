@@ -5,6 +5,8 @@ import ctypes
 
 
 __INDEX__ = '__index__'
+__FLOAT__ = '__float__'
+__BOOL__ = '__bool__'
 
 
 def _instance_has_method(obj, name):
@@ -20,10 +22,16 @@ class Interface(metaclass=MultiMeta):
 
     @classmethod
     def __check_obj__(cls, obj):
+        """
+        Simple hook to the builtin isinstance() function.
+        """
         return NotImplemented
 
     @classmethod
     def __check_subclass__(cls, subclass):
+        """
+        Simple hook to the builtin issubclass() function.
+        """
         return NotImplemented
 
     @classmethod
@@ -38,10 +46,15 @@ class Interface(metaclass=MultiMeta):
 class Buffer(Interface):
     """
     Interface representing objects that support the buffer protocol.
+    isinstance(x, Buffer) returns whether x supports the buffer protocol.
+
     Subclass check is not supported as there is no way in python to know
     if a class implements the buffer protocol.
     """
     def __init_subclass__(cls, **kwargs):
+        """
+        Implement class X(cls)
+        """
         raise _errors.err_depth(TypeError, "Cannot implement the buffer protocol in pure python.", depth=1)
 
     @classmethod
@@ -68,4 +81,36 @@ class SupportsIndex(Interface):
         return NotImplemented
 
     def __index__(self) -> int: ...
+
+
+class SupportsFloat(Interface):
+    @classmethod
+    def __check_obj__(cls, obj):
+        if _instance_has_method(obj, __FLOAT__):
+            return True
+        return NotImplemented
+
+    @classmethod
+    def __check_subclass__(cls, subclass):
+        if _class_has_method(subclass, __FLOAT__):
+            return True
+        return NotImplemented
+
+    def __float__(self) -> float: ...
+
+
+class SupportsBool(Interface):
+    @classmethod
+    def __check_obj__(cls, obj):
+        if _instance_has_method(obj, __BOOL__):
+            return True
+        return NotImplemented
+
+    @classmethod
+    def __check_subclass__(cls, subclass):
+        if _class_has_method(subclass, __BOOL__):
+            return True
+        return NotImplemented
+
+    def __bool__(self) -> bool: ...
 
