@@ -8,6 +8,7 @@ from ctypes import c_wchar as _wchar_t
 
 class Byte(_CType):
     __type__ = 'b'
+    __c_name__ = 'byte'
 
     def __init__(self, value):
         parse_args((value,), bytes, depth=1)
@@ -18,6 +19,7 @@ class Byte(_CType):
 
 class UByte(_CType):
     __type__ = 'B'
+    __c_name__ = 'unsigned byte'
 
     def __init__(self, value):
         parse_args((value,), bytes, depth=1)
@@ -30,6 +32,7 @@ class UByte(_CType):
 
 class Char(_CType):
     __type__ = 'c'
+    __c_name__ = 'char'
 
     def __init__(self, value):
         parse_args((value,), bytes, depth=1)
@@ -42,6 +45,7 @@ class WChar(_CType):
     # type not supported by the struct module, so we rely on ctypes.c_wchar:
     __type__ = '*'
     __simple__ = _wchar_t
+    __c_name__ = 'wchar_t'
 
     def __init__(self, value):
         parse_args((value,), str, depth=1)

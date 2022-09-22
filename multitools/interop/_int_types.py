@@ -2,6 +2,7 @@ from ._base_type import CType as _CType
 from ..errors._errors import err_depth
 from .._parser import parse_args
 from ..interface import SupportsIndex, SupportsBool
+from .. import *
 
 
 from ctypes import c_short as _short, c_int as _int, \
@@ -34,8 +35,13 @@ def _check_range(value, min_, max_):
         raise err_depth(OverflowError, _OVERFLOW_ERR_STR.format(min_, max_), depth=2)
 
 
+def _make_int(_raw_data):
+    return int.from_bytes(_raw_data, _DEFAULT_BYTEORDER)
+
+
 class Short(_CType):
     __type__ = 'h'
+    __c_name__ = 'short'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -43,9 +49,13 @@ class Short(_CType):
         _check_range(value, _SHORT_MIN, _SHORT_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class UShort(_CType):
     __type__ = 'H'
+    __c_name__ = 'unsigned short'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -53,9 +63,13 @@ class UShort(_CType):
         _check_range(value, 0, _USHORT_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class Int(_CType):
     __type__ = 'i'
+    __c_name__ = 'int'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -63,9 +77,13 @@ class Int(_CType):
         _check_range(value, _INT_MIN, _INT_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class UInt(_CType):
     __type__ = 'I'
+    __c_name__ = 'unsigned int'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -73,9 +91,13 @@ class UInt(_CType):
         _check_range(value, 0, _UINT_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class Long(_CType):
     __type__ = 'l'
+    __c_name__ = 'long'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -83,18 +105,26 @@ class Long(_CType):
         _check_range(value, _LONG_MIN, _LONG_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class ULong(_CType):
     __type__ = 'L'
+    __c_name__ = 'unsigned long'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
         value = value.__index__()
         _check_range(value, 0, _ULONG_MAX)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class LongLong(_CType):
     __type__ = 'q'
+    __c_name__ = 'long long'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -102,9 +132,13 @@ class LongLong(_CType):
         _check_range(value, _LONGLONG_MIN, _LONGLONG_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class ULongLong(_CType):
     __type__ = 'Q'
+    __c_name__ = 'unsigned long long'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -112,9 +146,14 @@ class ULongLong(_CType):
         _check_range(value, 0, _ULONGLONG_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class Size_t(_CType):
     __type__ = 'N'
+    __simple_type__ = 'P'
+    __c_name__ = 'size_t'
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -122,9 +161,14 @@ class Size_t(_CType):
         _check_range(value, 0, _SIZE_T_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class SSize_t(_CType):
     __type__ = 'n'
+    __simple_type__ = 'P'
+    __c_name__ = 'Py_ssize_t'  # yes, this is the case, whether you believe it or not
 
     def __init__(self, value):
         parse_args((value,), SupportsIndex, depth=1)
@@ -132,12 +176,22 @@ class SSize_t(_CType):
         _check_range(value, _SSIZE_T_MIN, _SSIZE_T_MAX)
         super().__init__(value)
 
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
 
 class Bool(_CType):
     __type__ = '?'
+    __c_name__ = 'bool'
 
     def __init__(self, value):
         parse_args((value,), SupportsBool, depth=1)
         value = bool(value)
         super().__init__(value)
+
+    def __int__(self):
+        return _make_int(self._data.view()[:])
+
+    def __bool__(self):
+        return bool(int(self))
 

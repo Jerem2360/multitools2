@@ -1,9 +1,9 @@
+from multitools.interop import *
 
 
-class C:
-    a = 10
-    x: int
-    y: float
+msvcrt = Library.load("msvcrt", callconv=__cdecl)
 
+test = msvcrt[1280]
 
-print(C.__annotations__)
+print(test(SSize_t(4)))
+

@@ -59,15 +59,26 @@ __CTYPE_BE__ = '__ctype_be__'
 
 
 class CTypeMeta(MultiMeta):
-    def __new__(mcs, name, bases, np):
+    """
+    Base metaclass for all C data types and structures.
+    Provides default implementations for customizable fields and
+    implements __repr__().
+    """
+    def __new__(mcs, name, bases, np, **kwargs):
         custom_simple = Ellipsis
         if '__simple__' in np:
             custom_simple = copy.copy(np['__simple__'])
             del np['__simple__']
 
+        _cname = np.get('__c_name__', name)
+        if _cname in (None, Ellipsis):
+            _cname = name
+
+        name = _cname
+
         parse_args((custom_simple,), type(Ellipsis) | type(_ctypes._SimpleCData) | None, depth=1)
 
-        cls = super().__new__(mcs, name, bases, np)
+        cls = super().__new__(mcs, name, bases, np, **kwargs)
 
         cls._SimpleType = None
         if custom_simple is not Ellipsis:
@@ -77,28 +88,28 @@ class CTypeMeta(MultiMeta):
             cls._SimpleType = custom_simple
         cls._is_basetype = False
         if hasattr(cls, __TYPE__):
-            struct_type = cls.__type__
-            cls.__type__ = struct_type
             cls.__byteorder__ = '@'
+            cls._little_endian_t = None
+            cls._big_endian_t = None
+            if cls.__type__ == '*' and cls._SimpleType is None:
+                raise err_depth(TypeError, "A C type that relies on the ctypes module must provide a source type.",
+                                depth=1)
+
+            if cls.__type__ == '*':
+                cls.__size__ = _ctypes.sizeof(cls._SimpleType)
+            else:
+                cls.__size__ = struct.calcsize(cls.__type__)
         else:
             cls._is_basetype = True
-        cls._size = struct.calcsize(cls.__type__)
-
-        cls._little_endian_t = None
-        cls._big_endian_t = None
-        if cls.__type__ == '*' and cls._SimpleType is None:
-            raise err_depth(TypeError, "A C type that relies on the ctypes module must provide a source type.", depth=1)
-
-        if cls.__type__ == '*':
-            cls.__size__ = _ctypes.sizeof(cls._SimpleType)
-        else:
-            cls.__size__ = struct.calcsize(cls.__type__)
         return cls
 
     def __repr__(cls):
-        return f"<C type {cls.__name__}>"
+        return f"<C type '{cls.__name__}'>"
 
     def with_byteorder(cls, byteorder):
+        """
+        Return the same type, but with a changed byteorder.
+        """
         if byteorder == 'little':
             if cls._little_endian_t is not None:
                 return cls._little_endian_t
@@ -139,8 +150,14 @@ class CTypeMeta(MultiMeta):
         res._big_endian_t = res
         return cls._big_endian_t
 
+    def __hash__(cls):
+        return id(cls)
+
     @property
     def __ctype__(cls):
+        """
+        The type in struct module format.
+        """
         return cls.__byteorder__ + cls.__type__
 
     @property
@@ -155,14 +172,13 @@ class CTypeMeta(MultiMeta):
         the type does not support __simple__, or Ellipsis '...' which maintains the default
         behaviour; otherwise TypeError is raised.
         """
-        if hasattr(cls, '_SimpleType'):
-            if cls._SimpleType is None:
-                raise err_depth(AttributeError, f"Class '{cls.__name__}' has no attribute '__simple__'.", depth=1)
+        if hasattr(cls, '_SimpleType') and cls._SimpleType is not None:
             return cls._SimpleType
 
         _supports_byteorder = getattr(cls, '__supports_byteorder__', False)
         _name = getattr(cls, '__simple_name__', cls.__name__ + '._SimpleType')
         _type = getattr(cls, '__simple_type__', cls.__type__)
+        # print(_type)
 
         class SimpleType(_ctypes._SimpleCData):
             _type_ = _type
@@ -197,7 +213,12 @@ class CTypeMeta(MultiMeta):
 
 class CType(metaclass=CTypeMeta):
     """
-    Common subclass for all C types.
+    Common base class for all C types.
+    C types represent data types that are present in the C and C++
+    languages, and serve the purpose of being passed as arguments
+    to external functions, from executables such as .dll or .so
+    files.
+
     In a C type's class body, multiple variables can be overridden:
 
     - __type__ must be set to the struct format for the type or '*' if not supported.
@@ -250,11 +271,10 @@ class CType(metaclass=CTypeMeta):
 
             if len(values) > 0:
                 self._data[:] = struct.pack(type(self).__ctype__, *values)
-
         self._args = values
 
     def __repr__(self):
-        return f"<C {type(self).__name__}({', '.join(self._args)})>"
+        return f"<C {type(self).__name__}({', '.join(repr(arg) for arg in self._args)})>"
 
     def __to_ctypes__(self):
         """
@@ -269,4 +289,8 @@ class CType(metaclass=CTypeMeta):
             return type(self).__simple__.from_buffer(self._data.view())  # we own our memory, return a new ctypes instance.
         except AttributeError:
             return None
+
+    @classmethod
+    def __from_ctypes__(cls, *values):
+        return cls(*((val.value if isinstance(val, SimpleCData) else val) for val in values))
 

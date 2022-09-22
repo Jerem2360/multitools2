@@ -57,7 +57,7 @@ def parse_args(args, *types, depth=0):
         raise err_depth(TypeError, "There must be as much types a arguments.", depth=1)
 
     if not isinstance(depth, int):
-        raise err_depth(TypeError, TYPE_ERR_STR.format('int', type(depth).__name__), depth=1)
+        raise err_depth(TypeError, TYPE_ERR_STR.format('int', _nameof(type(depth))), depth=1)
     if depth < 0:
         raise err_depth(ValueError, "Depth cannot be negative.", depth=1)
 
@@ -84,7 +84,7 @@ def _parse_one_arg(arg, tp):
     """_parse_one_arg(arg, type) -> valid_args, expected, got"""
     if isinstance(tp, types.GenericAlias):
         if not isinstance(arg, tp.__origin__):
-            return InvalidArg, tp.__origin__.__name__, type(arg).__name__
+            return InvalidArg, _nameof(tp.__origin__), _nameof(type(arg))
         valid, expected, got = None, None, None
         if tp.__origin__ is list:
             # noinspection PyTypeChecker
@@ -97,17 +97,25 @@ def _parse_one_arg(arg, tp):
             valid, expected, got = _parse_dict(arg, tp.__args__)
         if tp.__origin__ is abc.Callable:
             valid, expected, got = _parse_callable(arg)
-        if isinstance(tp, types.UnionType):
+        if tp.__origin__ is types.UnionType:
             valid, expected, got = _parse_one_arg(arg, tp.__args__)
 
-        if None in (valid, expected, got):
-            return InvalidArg, Ellipsis, tp.__origin__.__name__  # this means invalid generic / template type
+        if None in (valid, expected, got) and got not in expected.split(' | '):
+            return InvalidArg, Ellipsis, _nameof(tp.__origin__)  # this means invalid generic / template type
+
+        return valid, expected, got
+
+    if isinstance(tp, types.UnionType):
+        valid, expected, got = _parse_one_arg(arg, tp.__args__)
+        # print(repr(valid), repr(expected), repr(got))
+        if None in (valid, expected, got) and got not in expected.split(' | '):
+            return InvalidArg, Ellipsis, " | ".join(_nameof(a) for a in tp.__args__)  # this means invalid generic / template type
 
         return valid, expected, got
 
     if isinstance(tp, MultiMeta):
-        expected = tp.__name__
-        got = type(arg).__name__
+        expected = _nameof(tp)
+        got = _nameof(type(arg))
 
         if hasattr(tp, __ORIGIN__):  # tp is a template type
             arg_t = type(arg)
@@ -125,7 +133,7 @@ def _parse_one_arg(arg, tp):
     if isinstance(tp, (tuple, list)):
         valid_arg = arg
         expected = []
-        got = type(arg).__name__
+        got = _nameof(type(arg))
 
         do_check = True
         for t in tp:
@@ -135,18 +143,20 @@ def _parse_one_arg(arg, tp):
             expected.append(exp)
             got = _got
             if do_check:
-                if valid is InvalidArg:
+                if valid_arg is InvalidArg:
                     valid_arg = valid
                     do_check = False
 
         exp_str = ' | '.join(expected) if len(expected) > 0 else 'Any'
+        # print(valid_arg, exp_str, got)
         return valid_arg, exp_str, got
 
     if isinstance(tp, type):
-        expected = tp.__name__
-        got = type(arg).__name__
+        expected = _nameof(tp)
+        got = _nameof(type(arg))
         DEBUGGER.print("Parser: parsing ", arg, "isinstance =", isinstance(arg, tp))
         valid = InvalidArg if not isinstance(arg, tp) else arg
+        # print(valid, expected, got)
         return valid, expected, got
 
     return InvalidArg, repr(tp), Ellipsis  # tp cannot be type-checked against
@@ -174,13 +184,13 @@ def _parse_list(list_obj, args):
 def _parse_tuple(tuple_obj, args):
     """_parse_XXX(obj, args) -> valid_args, expected, got"""
     valid_args = []
-    expected = f"tuple[{', '.join((arg.__name__ if arg is not Ellipsis else '...') for arg in args)}]"
+    expected = f"tuple[{', '.join(_nameof(arg) for arg in args)}]"
     got = []
     if len(args) == 0:
         return InvalidArg, expected, 'tuple[]'
     if args[-1] is not Ellipsis:
         if len(args) != len(tuple_obj):
-            return InvalidArg, expected, f"tuple[{', '.join(type(x).__name__ for x in tuple_obj)}]"
+            return InvalidArg, expected, f"tuple[{', '.join(_nameof(type(x)) for x in tuple_obj)}]"
 
     do_check = True
     for i in range(len(tuple_obj)):
@@ -189,13 +199,13 @@ def _parse_tuple(tuple_obj, args):
             t_x = args[i]
         else:
             valid_args.append(x)
-            got.append(type(x).__name__)
+            got.append(_nameof(type(x)))
             continue
 
         if t_x is Ellipsis:
             do_check = False
             valid_args.append(x)
-            got.append(type(x).__name__)
+            got.append(_nameof(type(x)))
             continue
 
         valid, _, got_ = _parse_one_arg(x, t_x)
@@ -211,15 +221,15 @@ def _parse_dict(dict_obj, args):
     if len(args) != 2:
         return dict_obj, 'dict', 'dict'
 
-    expected = f"dict[{args[0].__name__}, {args[1].__name__}]"
+    expected = f"dict[{_nameof(args[0])}, {_nameof(args[1])}]"
     keys_valid = []
     values_valid = []
     kv_got = ['Any', 'Any']
 
     for k, v in dict_obj.items():
         k_t, v_t = args
-        k_valid, k_e, k_got = (_parse_one_arg(k, k_t)) if k_t is not Ellipsis else (k, '...', type(k).__name__)
-        v_valid, v_e, v_got = (_parse_one_arg(v, v_t)) if v_t is not Ellipsis else (v, '...', type(v).__name__)
+        k_valid, k_e, k_got = (_parse_one_arg(k, k_t)) if k_t is not Ellipsis else (k, '...', _nameof(type(k)))
+        v_valid, v_e, v_got = (_parse_one_arg(v, v_t)) if v_t is not Ellipsis else (v, '...', _nameof(type(v)))
         DEBUGGER.print(k_valid, v_valid)
         keys_valid.append(k_valid)
         values_valid.append(v_valid)
@@ -242,8 +252,16 @@ def _parse_dict(dict_obj, args):
 def _parse_callable(obj):
     # no check for the argument and return types are done, only callable(obj) is checked.
     if callable(obj):
-        return obj, 'Callable[[...], Any]', type(obj).__name__
-    return InvalidArg, 'Callable[[...], Any]', type(obj).__name__
+        return obj, 'Callable[[...], Any]', _nameof(type(obj))
+    return InvalidArg, 'Callable[[...], Any]', _nameof(type(obj))
+
+
+def _nameof(tp):
+    if tp is Ellipsis:
+        return '...'
+    if hasattr(tp, '__name__'):
+        return tp.__name__
+    return repr(tp)
 
 
 """

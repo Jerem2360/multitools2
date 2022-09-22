@@ -1,11 +1,16 @@
+import ctypes
 from ctypes import c_void_p as _void_p, POINTER as _PTR, sizeof as _sizeof, c_longlong as _longlong, \
     cast as _cast, py_object as _py_obj, c_char_p as _char_p, c_wchar_p as _wchar_p
+
+import _ctypes
 
 from ._base_type import CType as _CType, CTypeMeta as _CTypeMeta, NULL as _NULL
 from ..errors._errors import err_depth
 from .._meta import generic
 from .._parser import parse_args
 from ._mem import Memory
+from .._typeshed import *
+from .. import *
 
 
 _ULONGLONG_MAX = 2 ** (_sizeof(_longlong) * 8) - 1
@@ -23,11 +28,12 @@ class PointerType(_CTypeMeta):
     """
     Metatype for pointer types.
     """
-    def __new__(mcs, name, bases, np, ptype=None):
+    def __new__(mcs, name, bases, np, ptype=None, **kwargs):
         np['__type__'] = 'P'  # struct format for pointer is 'P'
-        cls = super().__new__(mcs, name, bases, np)
+        cls = super().__new__(mcs, name, bases, np, **kwargs)
         cls.__p_type__ = ptype
         cls.__name__ = (cls.__p_type__.__name__ if cls.__p_type__ is not None else 'void') + '*'
+        # print(cls)
         return cls
 
     @property
@@ -48,6 +54,9 @@ class PointerType(_CTypeMeta):
             return True
         return super().__instancecheck__(instance)
 
+    def __repr__(cls):
+        return f"<C type '{cls.__name__.split('[')[0]}'>"
+
 
 @generic(_CTypeMeta | None)  # same as @generic(type[CType] | None)
 class Pointer(_CType, metaclass=PointerType):
@@ -60,7 +69,7 @@ class Pointer(_CType, metaclass=PointerType):
         """
         parse_args((value,), int, depth=1)
         _check_range(value, 0, _ULONGLONG_MAX)
-        super().__init__(value)
+        super(type(self), self).__init__(value)
         self._addr = value
 
     def __eq__(self, other):
@@ -71,6 +80,17 @@ class Pointer(_CType, metaclass=PointerType):
         if (other is _NULL) and (self._addr == 0):
             return True
         return super().__eq__(other)
+
+    def __int__(self):
+        return int.from_bytes(self._data.view()[:], _DEFAULT_BYTEORDER)
+
+    def __index__(self):
+        return int(self)
+
+    def __repr__(self):
+        first = super(type(self), self).__repr__().split('[', 1)[0]
+        first += f"({int(self)})>"
+        return first
 
     @classmethod
     def __template__(cls, tp):
@@ -83,6 +103,7 @@ class Pointer(_CType, metaclass=PointerType):
         # no need to cache the pointer types, this is done by MultiMeta:
         res = cls.dup_shallow()
         res.__p_type__ = tp
+        res.__name__ = tp.__name__ + '*'
         return res
 
     @property
@@ -117,6 +138,7 @@ class Pointer(_CType, metaclass=PointerType):
         Pointer[PyTypeObject].to_py() -> the actual type object the pointer refers to
         Pointer[Char].to_py() -> a python byte-string representing the contents of the C string.
         Pointer[WChar].to_py() -> a python unicode-string representing the contents of the C unicode string.
+        Pointer.to_py() -> the address the pointer points to.
         """
         if hasattr(type(type(self).__p_type__), '_special'):
             if type(type(self).__p_type__)._special in (object, type):
@@ -126,6 +148,13 @@ class Pointer(_CType, metaclass=PointerType):
             if type(type(self).__p_type__)._special is bytes:
                 return _cast(self._addr, _char_p).value
         return self._addr
+
+    @classmethod
+    def __from_ctypes__(cls, *values):
+        ob = values[0]
+        parse_args((ob,), (int, _void_p, _char_p, _wchar_p, _ctypes._Pointer))
+        addr = (ctypes.cast(ob, _void_p) if not isinstance(ob, _void_p) else ob).value
+        return cls(addr)
 
 
 # register plain Pointer as being the same as Pointer[None] :

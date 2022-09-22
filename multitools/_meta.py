@@ -78,8 +78,10 @@ def generic(cls, *types):
     Note that template types are cached, so __template__ will
     be called only once for each distinct set of template arguments.
     """
-    if not _typecheck_template_type(types):
-        raise err_depth(TypeError, TYPE_ERR_STR.format('type | tuple[type, ...]', type(types).__name__), depth=2)
+    # if not _typecheck_template_type(types):
+    #    raise err_depth(TypeError, TYPE_ERR_STR.format('type | tuple[type, ...]', type(types).__name__), depth=2)
+    from ._parser import parse_args
+    parse_args((types,), type | tuple[type, ...])
     if not isinstance(cls, type):
         # here depth is 2 because our function will be called by Decorator.__call__.<_inner>, adding a layer to the call stack.
         raise err_depth(TypeError, TYPE_ERR_STR.format('type', type(cls).__name__), depth=2)
@@ -137,6 +139,7 @@ class _AbstractMethod:
             self._allow_instance_get = False
 
         self._source = func
+        self.__owner__ = None
         self.__code__ = None
 
     def __get__(self, instance, owner):
@@ -146,6 +149,7 @@ class _AbstractMethod:
             self.__self__ = instance
         if not self._allow_class_get:
             raise err_depth(TypeError, "Abstract method / field.", depth=1)
+        self.__owner__ = owner
         return self
 
     def __call__(self, *args, **kwargs):
@@ -157,6 +161,11 @@ class _AbstractMethod:
         if hasattr(self.__func__, item):
             return getattr(self.__func__, item)
         raise err_depth(AttributeError, ATTR_ERR_STR.format(self.__class__.__name__, item), depth=1)
+
+    def __repr__(self):
+        tpname = 'method' if isinstance(self._source, (Function, Method, MethodWrapper, WrapperDescriptor)) else \
+            type(self._source).__name__
+        return f"<abstract {tpname} '{self.__owner__.__name__}.{self.__name__}'>"
 
 
 ### -------- MultiMeta -------- ###
@@ -305,6 +314,7 @@ class MultiMeta(type):
                 _abs = True
 
         for k, v in np.items():
+            # print(k, v, name)
             if v is Ellipsis:
                 np[k] = _AbstractField()
 
@@ -360,6 +370,7 @@ class MultiMeta(type):
         cls.__abstract__ = False
         cls.__abstracts__ = abs_attrs
 
+        # print(cls.__dict__)
         for k, v in cls.__dict__.items():
             if getattr(v, __ISABSTRACTMETHOD__, False):
                 cls.__abstract__ = True
@@ -367,6 +378,7 @@ class MultiMeta(type):
                 if not isinstance(v, _AbstractMethod):
                     setattr(cls, k, _AbstractMethod(v))
             elif getattr(v, __ISABSTRACT__, False):
+                # print(k, v, cls)
                 cls.__abstract__ = True
                 cls.__abstracts__.append(k)
                 if not isinstance(v, _AbstractField):
@@ -400,7 +412,8 @@ class MultiMeta(type):
         Implement copy.copy(cls)
         """
         _D_COPY.print("running 'copy'...")
-        return type(cls)(cls.__name__, cls.__bases__, dict(cls.__dict__).copy(), generic=cls.__generic__, _copy=True)
+        res = type(cls)(cls.__name__, cls.__bases__, dict(cls.__dict__).copy(), generic=cls.__generic__, _copy=True)
+        return res
 
     def __deepcopy__(cls, memodict={}):
         """
@@ -448,14 +461,15 @@ class MultiMeta(type):
             return cls
 
         args = (item,) if not isinstance(item, tuple) else item
+        # print(args, cls)
         if len(args) != len(cls.__generic__):
             raise err_depth(TypeError, POS_ARGCOUNT_ERR_STR.format(f"{cls.__name__}[]", len(cls.__generic__), len(args)), depth=1)
 
-        if args in cls._typecache:
+        if args in tuple(cls._typecache):
             return cls._typecache[args]
 
         for i in range(len(args)):
-            if cls.__generic__[i] is Ellipsis:
+            if cls.__generic__[i] is Ellipsis or args[i] is Ellipsis:
                 continue
             if not _typecheck_template(args[i], cls.__generic__[i]):
                 expected = ' | '.join(t.__name__ for t in cls.__generic__[i]) if isinstance(cls.__generic__[i], tuple) else cls.__generic__[i].__name__
@@ -488,16 +502,17 @@ class MultiMeta(type):
         if hasattr(cls, __INSTANCEHOOK__):
             # noinspection PyUnresolvedReferences
             res = cls.__instancehook__(instance)
-            if res is not NotImplemented:
+            if res is NotImplemented:
                 return super().__instancecheck__(instance)
+            return res
 
         if not hasattr(cls, __ORIGIN__):
-            return False
+            return super().__instancecheck__(instance)
         # noinspection PyUnresolvedReferences
         return isinstance(instance, cls.__origin__)
 
     def __eq__(cls, other):
-        if hasattr(cls, __ORIGIN__):
+        if hasattr(cls, __ORIGIN__) and isinstance(other, type(cls)):
             # noinspection PyUnresolvedReferences
             return (cls.__args__ == other.__args__) and (cls.__origin__ == other.__origin__)
         return super().__eq__(other)
@@ -543,8 +558,8 @@ class MultiMeta(type):
         """
         Internal helper function to allow MultiMeta and its subclasses' __copy__ and
         __deepcopy__ methods to be called by the copy module.
-        This makes true deepcopy possible on type objects.
-        This actually adds the metatype to copy dispatches.
+        This makes true deepcopy possible on type objects and,
+        it actually adds the metatype to copy dispatches.
         """
         # Sadly, the only way to do this is to change variables from the copy module
         # directly and by force.
@@ -615,6 +630,7 @@ def _check_friends(friends):
 
 
 def _typecheck_template_type(tp):
+    # print(tp)
     if isinstance(tp, (type, type(Ellipsis))):
         return True
     if isinstance(tp, tuple):

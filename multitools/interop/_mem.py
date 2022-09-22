@@ -195,7 +195,6 @@ class Memory:
             # self._view.itemsize is also guaranteed to be 1:
             self._view = mv
             return
-
         if isinstance(args[0], SupportsIndex):  # Memory(size: SupportsIndex)
             size = args[0].__index__()
             self._view = memoryview(bytearray(size))

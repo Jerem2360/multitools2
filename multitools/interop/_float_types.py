@@ -12,6 +12,7 @@ def _parse_float(value, depth=0):
 
 class Float(_CType):
     __type__ = "f"
+    __c_name__ = 'float'
 
     def __init__(self, value):
         value = _parse_float(value, depth=1)
@@ -20,6 +21,7 @@ class Float(_CType):
 
 class Double(_CType):
     __type__ = 'd'
+    __c_name__ = 'double'
 
     def __init__(self, value):
         value = _parse_float(value, depth=1)
@@ -30,6 +32,7 @@ class LongDouble(_CType):
     # this type is not supported by the struct module, so we rely on ctypes.c_longdouble:
     __simple__ = _longdouble
     __type__ = '*'
+    __c_name__ = 'long double'
 
     def __init__(self, value):
         value = _parse_float(value, depth=1)

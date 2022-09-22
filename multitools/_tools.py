@@ -41,7 +41,7 @@ class Decorator:
 
     def __call__(self, *args, **kwargs):
         def _inner(fn):
-            self.__func__(fn, *args, **kwargs)
+            return self.__func__(fn, *args, **kwargs)
 
         _inner.__name__ = f"{self.__func__.__name__}.decoration"
         _inner.__module__ = self.__func__.__module__
@@ -52,4 +52,16 @@ class Decorator:
         if hasattr(self.__func__, item):
             return getattr(self.__func__, item)
         raise err_depth(TypeError, ATTR_ERR_STR.format(type(self).__name__, item), depth=1)
+
+
+def _branchless_condition(condition, if_true, if_false=None):
+    """
+    Tool for branchless programming. Note that everything that is passed in
+    here is evaluated and potentially called, no matter what is condition.
+    Only the result of this function depends on the condition.
+    """
+    condition = bool(condition)
+    if_true = bool(if_true)
+    if_false = bool(if_false)
+    return condition * if_true + (not condition) * if_false
 

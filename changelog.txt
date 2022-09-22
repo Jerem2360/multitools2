@@ -1,5 +1,8 @@
-1.0.9s19
-- Added C floating point, integer, and character types to interop submodule
-- Added a structure base class and pointer types to interop submodule
-- Added some structs from the C api in interop submodule
-
+1.0.9s20
+- Added 'cast' and 'sizeof' functions to interop submodule
+- Added 'dllimport' decorator for loading foreign functions
+- Added class 'Library' for executables
+- Added new CFunction type for foreign functions themselves
+- Exported NULL
+- Made calling conventions distinguishable from simple ints
+- Added basic private support for dynamic memory management (will be exported later)
