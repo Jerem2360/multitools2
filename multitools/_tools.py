@@ -1,3 +1,6 @@
+import os.path
+import sys
+
 from ._typeshed import *
 from .errors._errors import err_depth, NOT_CALLABLE_ERR_STR, ATTR_ERR_STR
 
@@ -64,4 +67,13 @@ def _branchless_condition(condition, if_true, if_false=None):
     if_true = bool(if_true)
     if_false = bool(if_false)
     return condition * if_true + (not condition) * if_false
+
+
+def _update_path_to_cwd():
+    """
+    Add the current working directory to sys.path. This is automatically done
+    at the start of the interpreter, but never occurs when changing os.curdir
+    at runtime.
+    """
+    sys.path.append(os.path.realpath('.'))
 

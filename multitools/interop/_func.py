@@ -1,6 +1,9 @@
 import ctypes
 import struct
 
+import _ctypes
+from ctypes import c_void_p as _void_p
+
 from ._base_type import CType, CTypeMeta, NULL
 from .._meta import generic
 from .._typeshed import *
@@ -15,9 +18,21 @@ from _ctypes import CFuncPtr as _CFuncPtr
 AnyType = singleton("AnyType", __name__)
 
 
-def _call_fn_at_address(address, sig, *args, **kwargs):
+def _errcheck(res, fn, args):
+    return res
+
+
+def _call_fn_at_address(address, sig, flags, *args, **kwargs):
     argtypes, restype = sig
-    fn = ctypes.cast(address, ctypes.CFUNCTYPE(_get_ct_type(restype), *(_get_ct_type(a) for a in argtypes)))
+
+    if argtypes is Ellipsis:
+        class _FT(_ctypes.CFuncPtr):
+            _flags_ = flags
+        fn = ctypes.cast(address, _FT)
+        fn.argtypes = None
+    else:
+        fn = ctypes.cast(address, ctypes.CFUNCTYPE(_get_ct_type(restype), *(_get_ct_type(a) for a in argtypes)))
+    fn.errcheck = _errcheck
     ct_args = tuple(_make_ctypes_arg(arg) for arg in args)
     ct_kwargs = {k: _make_ctypes_arg(v) for k, v in kwargs.items()}
     #
@@ -130,11 +145,12 @@ class CFunction(CType, metaclass=_CFunctionMeta):
         self._address = args[0]
         super(type(self), self).__init__(args[0])
         self._data.view()[:] = struct.pack('P', args[0])
+        self._flags = int(kwargs.get('flags', 0))
 
     def __call__(self, *args, **kwargs):
         if self._address <= 0:
             raise err_depth(ValueError, "NUL pointer reference.", depth=1)
-        res = _call_fn_at_address(self._address, (type(self)._argtypes, type(self)._restype), *args, **kwargs)
+        res = _call_fn_at_address(self._address, (type(self)._argtypes, type(self)._restype), self._flags, *args, **kwargs)
         if type(self)._restype is None:
             return
         return res

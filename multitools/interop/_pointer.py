@@ -88,6 +88,8 @@ class Pointer(_CType, metaclass=PointerType):
         return int(self)
 
     def __repr__(self):
+        if type(self).__p_type__ is None:
+            return super(type(self), self).__repr__()
         first = super(type(self), self).__repr__().split('[', 1)[0]
         first += f"({int(self)})>"
         return first
@@ -155,6 +157,10 @@ class Pointer(_CType, metaclass=PointerType):
         parse_args((ob,), (int, _void_p, _char_p, _wchar_p, _ctypes._Pointer))
         addr = (ctypes.cast(ob, _void_p) if not isinstance(ob, _void_p) else ob).value
         return cls(addr)
+
+    def __to_ctypes__(self):
+        _pt = _ctypes.POINTER(type(self).__p_type__.__simple__)
+        return _pt(int(self))
 
 
 # register plain Pointer as being the same as Pointer[None] :

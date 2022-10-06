@@ -10,10 +10,9 @@ __all__ = [
     "abstractmethod",
 ]
 
-
 ### -------- Imports -------- ###
-import sys
-import copy
+import copyreg
+import io
 
 from ._startup._debug import debugger
 from . import *
@@ -36,6 +35,8 @@ __INSTANCEHOOK__ = '__instancehook__'
 __ISABSTRACTMETHOD__ = '__isabstractmethod__'
 __ISABSTRACT__ = '__isabstract__'
 __ABSTRACT__ = '__abstract__'
+__GETSTATE__ = '__getstate__'
+__SETSTATE__ = '__setstate__'
 __REVERSED__ = '@MultiMeta/friendship/reversed'
 __CREATION__ = '@MultiMeta/creation'
 
@@ -288,7 +289,9 @@ class MultiMeta(type):
     Note that __template__ is called only once for each different template argument
     combination: for performance and coherence purposes, template types are cached.
     """
-    def __new__(mcs, name, bases, np, generic=None, friends=None, **kwargs):
+    _copyreg_ok = False
+
+    def __new__(mcs, name, bases, np, *, generic=None, friends=None, **kwargs):
         """
         Create and return a new type object.
         The 'friends' parameter allows specifying class friendship for types
@@ -314,11 +317,15 @@ class MultiMeta(type):
                 _abs = True
 
         for k, v in np.items():
-            # print(k, v, name)
             if v is Ellipsis:
                 np[k] = _AbstractField()
 
+        _reduce = np.get('__reduce__', None)
+        if not isinstance(_reduce, classmethod):
+            _reduce = None
+
         cls = super().__new__(mcs, name, bases, np)
+        cls._has_reduce = _reduce is not None
         setattr(cls, __CREATION__, True)
         if not kwargs.get('_copy', False):
             _D_MULTIMETA.print(f"creating MultiMeta class '{name}' ...")
@@ -387,6 +394,8 @@ class MultiMeta(type):
         cls.__abstract__ = _abs or cls.__abstract__
         setattr(cls, __CREATION__, False)
 
+        cls._newkwargs = kwargs
+
         return cls
 
     def __setattr__(cls, key, value):
@@ -406,6 +415,9 @@ class MultiMeta(type):
         """
         _D_MULTIMETA.print(f"registering '{mcs.__name__}' MultiMeta subclass.")
         mcs._register_copy_dispatches()
+        if (not mcs._copyreg_ok) and ((__GETSTATE__ in mcs.__dict__) or (__SETSTATE__ in mcs.__dict__)):
+            copyreg.pickle(mcs, mcs._reducer)
+            mcs._copyreg_ok = True
 
     def __copy__(cls):
         """
@@ -422,6 +434,7 @@ class MultiMeta(type):
         for MultiMeta and its subclasses. This is made possible by the internal
         _register_copy_dispatches() helper function.
         """
+        import copy
         _D_COPY.print(f"running 'deepcopy'...")
         np = {}
         for k, v in cls.__dict__.items():
@@ -499,6 +512,10 @@ class MultiMeta(type):
         return res
 
     def __instancecheck__(cls, instance):
+        """
+        Implement a '__instancehook__' class-method callback
+        for types, in a similar way as for abc.ABCMeta .
+        """
         if hasattr(cls, __INSTANCEHOOK__):
             # noinspection PyUnresolvedReferences
             res = cls.__instancehook__(instance)
@@ -512,12 +529,25 @@ class MultiMeta(type):
         return isinstance(instance, cls.__origin__)
 
     def __eq__(cls, other):
+        """
+        Two different templates of the same type
+        will not compare equal, while the behaviour
+        for the original type object is kept untouched.
+
+        e.g.
+        Pointer[Int] != Pointer[Float] != Pointer
+        Pointer == Pointer
+        """
         if hasattr(cls, __ORIGIN__) and isinstance(other, type(cls)):
             # noinspection PyUnresolvedReferences
             return (cls.__args__ == other.__args__) and (cls.__origin__ == other.__origin__)
         return super().__eq__(other)
 
     def __subclasscheck__(cls, subclass):
+        """
+        Implement a '__subclasshook__' class-method callback
+        for types, in a similar way as for abc.ABCMeta .
+        """
         if hasattr(cls, __SUBCLASSHOOK__):
             # noinspection PyUnresolvedReferences
             res = cls.__subclasshook__(subclass)
@@ -525,7 +555,27 @@ class MultiMeta(type):
                 return res
         return super().__subclasscheck__(subclass)
 
+    def __getstate__(self):
+        """
+        Default:
+        invokes the builtin behaviour for __getstate__ and
+        __setstate__.
+        Note:
+            If __getstate__() returns NotImplemented, __setstate__()
+            will not be called.
+        """
+        return NotImplemented
+
+    def __setstate__(self, state):
+        """
+        Default behaviour. Does nothing.
+        """
+        pass
+
     def __call__(cls, *args, **kwargs):
+        """
+        Disallow instantiation of abstract types.
+        """
         if cls.__abstract__:
             raise err_depth(TypeError, "Abstract type.", depth=1)
         return super().__call__(*args, **kwargs)
@@ -535,6 +585,7 @@ class MultiMeta(type):
         Duplicate a type using shallow copy.
         Useful to implement the __template__ callback.
         """
+        import copy
         return copy.copy(cls)
 
     def dup_deep(cls):
@@ -542,6 +593,7 @@ class MultiMeta(type):
         Duplicate a type using deep copy.
         Useful to implement the __template__ callback.
         """
+        import copy
         return copy.deepcopy(cls)
 
     def is_generic(cls):
@@ -561,6 +613,7 @@ class MultiMeta(type):
         This makes true deepcopy possible on type objects and,
         it actually adds the metatype to copy dispatches.
         """
+        import copy
         # Sadly, the only way to do this is to change variables from the copy module
         # directly and by force.
         # But this only acts on MultiMeta and its subclasses, who are generally private,
@@ -572,7 +625,112 @@ class MultiMeta(type):
         copy.copy.__globals__['_copy_dispatch'][mcs] = mcs.copy  # real location is copy._copy_dispatch
 
     def _register_typ_cache(cls, args, tp):
+        """
+        Internal helper.
+        Register a template version of a class to its type cache.
+        """
         cls._typecache[args] = tp
+
+    def _reducer(cls):
+        """
+        Internal callback.
+        Allows pickle callbacks of types to be used as normal upon
+        pickling/unpickling.
+        Note: only __reduce__, __setstate__ and __getstate__ are concerned by this.
+        """
+        if cls._has_reduce:
+            return type(cls).__reduce__(cls)
+        state = cls._getstate_wrapper()
+        if state == 0:  # default behaviour
+            state = cls._get_bytes()
+        return (
+            type(cls)._setstate_wrapper,
+            (state,)
+        )
+
+    def _get_bytes(cls):
+        """
+        Internal helper reproducing the builtin behaviour for
+        pickling type objects.
+        """
+        import pickle
+        f = io.BytesIO()
+        # noinspection PyUnresolvedReferences
+        p = pickle._Pickler(f)
+        p.dispatch_table = copyreg.dispatch_table.copy()
+        p.dispatch_table.pop(type(cls))  # temporary dispatch table to avoid recursion
+        p.dump(cls)
+        del p.dispatch_table
+        return f.getvalue()
+
+    @classmethod
+    def _recover_from_bytes(mcs, data):
+        """
+        Internal helper reproducing the builtin behaviour for
+        unpickling type objects.
+        """
+        import pickle
+        f = io.BytesIO()
+        f.write(data)
+        # noinspection PyUnresolvedReferences
+        u = pickle._Unpickler(f)
+        u.dispatch_table = copyreg.dispatch_table.copy()
+        u.dispatch_table.pop(mcs)  # temporary dispatch table to avoid recursion
+        res = u.load()
+        del u.dispatch_table
+        return res
+
+    def _getstate_wrapper(cls):
+        """
+        Internal helper that mimics the behaviour of the pickle module
+        when pickling/unpickling.
+        """
+        np = {
+            '__name__': cls.__name__,  # needed as an argument to type.__new__()
+            '__bases__': cls.__bases__,  # needed as an argument to type.__new__()
+            '__module__': cls.__module__,  # must be present, otherwise will take the same value as for the metaclass
+            '**kwargs': cls._newkwargs,  # needed as arguments to potential subclass.__new__()
+        }
+        getstate = getattr(cls, __GETSTATE__, None)
+        if getstate is NotImplemented:  # the builtin behaviour is requested
+            return 0
+        if getstate is not None:
+            np['#state'] = getstate()  # the actual state that will be passed in later to __setstate__()
+            return np
+
+        cls_np = dict(cls.__dict__).copy()
+        del cls_np['__name__'], cls_np['__bases__'], cls_np['**kwargs'], cls_np['__dict__'], cls_np['__weakref__'], \
+            cls_np['__module__']  # remove values that might override ours or cause errors due to their type
+
+        np.update(cls_np, **{'#state': np.copy()})
+        return np
+
+    @classmethod
+    def _setstate_wrapper(mcs, state):
+        """
+        Internal helper that mimics the behaviour of the pickle module
+        upon pickling/unpickling.
+        """
+        if isinstance(state, bytes):  # catch when we should adopt the default behaviour
+            cls = mcs._recover_from_bytes(state)
+            if not isinstance(cls, mcs):
+                raise err_depth(
+                    TypeError,
+                    f"Received data of an unexpected type: {type(cls).__name__} instead of {mcs.__name__}.",
+                    depth=1,
+                )
+            return cls
+        name = state.pop('__name__', None)
+        bases = state.pop('__bases__', None)
+        new_kwargs = state.pop('**kwargs', {})
+        real_state = state.pop('#state')
+        np = state.copy()
+
+        cls = mcs.__new__(mcs, name, bases, np, **new_kwargs)
+        setstate = getattr(cls, __SETSTATE__, None)
+        if setstate is not None:
+            setstate(real_state)
+        return cls
 
     @classmethod
     def copy(mcs, x):
@@ -605,6 +763,8 @@ class MultiMeta(type):
 
 # register MultiMeta into copy dispatches:
 MultiMeta._register_copy_dispatches()
+
+# MultiMeta shall not be saved in copyreg.dispatch_table .
 
 
 ### -------- Helper Functions -------- ###

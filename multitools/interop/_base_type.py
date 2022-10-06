@@ -12,6 +12,8 @@ from .._typeshed import *
 from .._parser import *
 from .._singleton import Singleton
 
+from ..interface import SupportsIndex
+
 
 """
 class PyObject(Struct):
@@ -105,6 +107,16 @@ class CTypeMeta(MultiMeta):
 
     def __repr__(cls):
         return f"<C type '{cls.__name__}'>"
+
+    def __mul__(cls, other):
+        """
+        CType * n -> a C type representing arrays of n CType instances.
+        Same as in ctypes, except we use our own data types.
+        """
+        parse_args((other,), SupportsIndex, depth=1)
+        other = other.__index__()
+        from . import _array
+        return _array.Array[cls, other]
 
     def with_byteorder(cls, byteorder):
         """
