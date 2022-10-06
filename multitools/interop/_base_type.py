@@ -276,6 +276,9 @@ class CType(metaclass=CTypeMeta):
     def __repr__(self):
         return f"<C {type(self).__name__}({', '.join(repr(arg) for arg in self._args)})>"
 
+    def get_data(self):
+        return bytes(self._data.view()[:])
+
     def __to_ctypes__(self):
         """
         Default implementation.
