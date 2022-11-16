@@ -160,7 +160,7 @@ class Pointer(_CType, metaclass=PointerType):
 
     def __to_ctypes__(self):
         _pt = _ctypes.POINTER(type(self).__p_type__.__simple__)
-        return _pt(int(self))
+        return ctypes.cast(int(self), _pt)
 
 
 # register plain Pointer as being the same as Pointer[None] :

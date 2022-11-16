@@ -309,3 +309,7 @@ class CType(metaclass=CTypeMeta):
     def __from_ctypes__(cls, *values):
         return cls(*((val.value if isinstance(val, SimpleCData) else val) for val in values))
 
+    @property
+    def __address__(self):
+        return self._data.address
+

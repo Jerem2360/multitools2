@@ -13,6 +13,7 @@ __all__ = [
     "dllimport",
     "sizeof",
     "cast",
+    "addressof",
     "NULL",
 
     "Library",
@@ -32,6 +33,7 @@ __all__ = [
     "WChar",
     "Byte",
     "UByte",
+    "String",
 
     "PyObject",
 
@@ -39,13 +41,14 @@ __all__ = [
 
     "Int",
     "Pointer",
+    "Array",
     "Size_t",
     "SSize_t",
 ]
 
 import sys
 
-from . import _chars, _pointer, _structure, _int_types, _float_types, _func, _pyapi
+from . import _chars, _pointer, _structure, _int_types, _float_types, _array, _func, _pyapi, _string
 from .._tools import Decorator as _Decorator
 from .. import _parser
 from .. import _typeshed
@@ -117,6 +120,11 @@ def cast(val, tp):
     return inst
 
 
+def addressof(ob):
+    _parser.parse_args((ob,), CType, depth=1)
+    return Pointer[type(ob)](ob.__address__)
+
+
 Library = _Library
 
 CType = _base_type.CType
@@ -144,6 +152,7 @@ Char = _chars.Char
 WChar = _chars.WChar
 Byte = _chars.Byte
 UByte = _chars.UByte
+String = _string.String
 
 Struct = _structure.Struct
 
@@ -151,6 +160,8 @@ PyObject = _pyapi.PyObject
 PyTypeObject = _pyapi.PyTypeObject
 
 Pointer = _pointer.Pointer
+
+Array = _array.Array
 
 NULL = _base_type.NULL
 

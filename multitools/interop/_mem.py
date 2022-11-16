@@ -143,6 +143,7 @@ class Memory:
         if len(args) != 1:
             raise err_depth(TypeError, POS_ARGCOUNT_ERR_STR.format('Memory.__init__', 1, len(args)), depth=1)
 
+        self._do_free = kwargs.get('auto_free', True)
         if isinstance(args[0], Buffer):  # Memory(source: Buffer)
             source = args[0]
 
@@ -207,6 +208,8 @@ class Memory:
         """
         Implement del self
         """
+        if not self._do_free:
+            return
         try:
             self.release()
         except:
@@ -336,6 +339,8 @@ class Memory:
             self._ensure_alive()
         except:
             return 0
+        if self._buf is None:
+            return _buffer_get_pointer(self._view.obj)  # we own ourselves, so our buffer object is necessarily a bytearray
         return self._buf.buf
 
     @property
