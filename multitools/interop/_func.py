@@ -24,7 +24,7 @@ def _errcheck(res, fn, args):
 
 def _call_fn_at_address(address, sig, flags, *args, **kwargs):
     argtypes, restype = sig
-    print(argtypes, '\n', args)
+    # print(argtypes, '\n', args)
 
     if argtypes is Ellipsis:
         class _FT(_ctypes.CFuncPtr):
@@ -40,7 +40,7 @@ def _call_fn_at_address(address, sig, flags, *args, **kwargs):
     # (ct_args, ct_kwargs)
     try:
         res = fn(*ct_args, **ct_kwargs)
-    except ctypes.ArgumentError as e:
+    except ctypes.ArgumentError:
         # print(*e.args)
         raise err_depth(TypeError, "Invalid argument type(s).", depth=2) from None
     if _get_ct_type(restype) is None:

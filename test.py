@@ -1,13 +1,22 @@
-from multitools.interop import *
+import _thread
+import os
+import sys
+import time
 
-msvcrt = Library.load('msvcrt.dll')
+from multitools2._internal import tstate, threadrun
 
-@dllimport(msvcrt)
-def printf(msg: Array[Char, 3]) -> None: ...
+# print(tstate.main_thread.alive)
 
-data = Array[Char, 3](Char(b'a'), Char(b'b'), Char(b'c'))
+def act(state):
+    state._begin()
+    time.sleep(1)
+    print('thread:', state.call_stack)
+    state._end()
 
 
-printf(data)
-
+th = threadrun.start(act, ())
+# print('main:', th)
+time.sleep(2)
+# print(_thread.get_native_id())
+print(tstate._threads)
 

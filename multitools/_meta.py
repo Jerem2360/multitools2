@@ -578,7 +578,7 @@ class MultiMeta(type):
         """
         if cls.__abstract__:
             raise err_depth(TypeError, "Abstract type.", depth=1)
-        return super().__call__(*args, **kwargs)
+        return type.__call__(cls, *args, **kwargs)
 
     def dup_shallow(cls):
         """

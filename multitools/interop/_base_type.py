@@ -180,7 +180,7 @@ class CTypeMeta(MultiMeta):
         or a _ctypes.Structure subclass.
         This is only defined if the equivalent of this type in ctypes inherits from
         _ctypes._SimpleCData or _ctypes.Structure .
-        If overridden, this must be set to a base class of _ctypes._SimpleCData or _ctypes.Structure, None if
+        If overridden, this must be set to a subclass of _ctypes._SimpleCData or _ctypes.Structure, None if
         the type does not support __simple__, or Ellipsis '...' which maintains the default
         behaviour; otherwise TypeError is raised.
         """

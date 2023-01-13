@@ -80,6 +80,31 @@ class StructMeta(CTypeMeta):
 
 
 class Struct(CType, metaclass=StructMeta):
+    """
+    Base class for creating C structure types.
+    To create a structure type, simply inherit from
+    this type.
+    Custom fields must be implemented by declaring them
+    without assignment, as if they were just annotations,
+    e.g.
+
+    class CComplex(Struct):
+        real: Double
+        imag: Double
+
+    The above class behaves as if it were the following
+    C structure:
+
+    typedef struct CComplex {
+        double real;
+        double imag;
+    };
+
+    This also works for C++ classes, except virtual methods
+    are not supported yet.
+
+    Note that in C++, methods cannot be deduced from instances at runtime.
+    """
 
     def __init__(self, *values):
         if type(self).__type__ != '*':
@@ -136,4 +161,7 @@ class Struct(CType, metaclass=StructMeta):
             cnt += 1
 
         return cls(*field_values)
+
+    def __to_ctypes__(self):
+        return type(self).__simple__.from_buffer(self._data.view())
 

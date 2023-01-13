@@ -104,6 +104,7 @@ class Array(CType, metaclass=ArrayType):
         """
         Implement cls[tp, length]
         """
+        parse_args((tp, length), type, SupportsIndex, depth=1)
         res = cls.dup_shallow()
         res.__atype__ = tp
         res.__length__ = length.__index__()
@@ -179,8 +180,8 @@ class Array(CType, metaclass=ArrayType):
         Convert this instance to its ctypes homologous.
         """
         _at = _ctypes.POINTER(type(self).__atype__.__simple__)
-        print(int(self))
-        print(_at, type(self).__atype__.__simple__)
+        # print(int(self))
+        # print(_at, type(self).__atype__.__simple__)
         return ctypes.cast(int(self), type(self).__simple__)
 
     @classmethod

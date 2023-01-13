@@ -89,7 +89,7 @@ class Library:
         try:
             fn = _FT((name, self))
         except AttributeError:
-            msg = f"Unknown function '{name}'." if isinstance(name, str) else f"Ordinal {name} ({hex(name)}) not found."
+            msg = f"Unknown symbol '{name}'." if isinstance(name, str) else f"Ordinal {name} ({hex(name)}) not found."
             # noinspection PyExceptionInherit
             raise UnresolvedExternalError(msg, depth=1) from None
         addr = _cast(fn, _void_p).value

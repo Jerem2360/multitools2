@@ -34,10 +34,12 @@ __all__ = [
     "Byte",
     "UByte",
     "String",
+    "WString",
 
     "PyObject",
 
     "CFunction",
+    "Struct",
 
     "Int",
     "Pointer",
@@ -153,6 +155,7 @@ WChar = _chars.WChar
 Byte = _chars.Byte
 UByte = _chars.UByte
 String = _string.String
+WString = _string.WString
 
 Struct = _structure.Struct
 
