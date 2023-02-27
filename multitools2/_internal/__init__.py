@@ -1,7 +1,6 @@
 import sys
 
 
-
 __all__ = [
     '__NAME__',
     '__DEBUG__',
@@ -17,7 +16,69 @@ __all__ = [
     'TYPE_ERR',
     'NOT_CALLABLE_ERR',
     'ATTRIBUTE_ERR',
+
+    'TPFLAGS_HEAPTYPE',
 ]
+
+TPFLAGS_HEAPTYPE = 1 << 9
+
+STATIC_OBJECTS = [
+    b'',
+    '',
+]
+
+from . import _trace
+
+def trace_opcodes():
+    """
+    Enable tracing of opcodes.
+    For performance reasons, this is disabled by default.
+    """
+    _trace._trace_opcodes = True
+
+@_trace.Tracker
+def __tracker__(frame, event, args):
+    """
+    Track everything that happens in the interpreter.
+    frame, event and args are the tracing and profiling parameters.
+    ** don't touch! **
+    """
+    try:
+        frame.f_trace_opcodes = _trace._trace_opcodes
+        trackers = _trace._trackers.get(_trace.TrackEvent(event), [])
+    except NameError:
+        return
+    for tracker in trackers:
+        if callable(tracker):
+            tracker(frame, event, args)
+
+
+del _trace
+
+_path_sep = '\\' if sys.platform == 'win32' else '/'
+
+i = -1
+_f = None
+while True:
+    i += 1
+    try:
+        _f = sys._getframe(i)
+    except ValueError:
+        break
+    if _f.f_code.co_filename in (
+            "<frozen importlib._bootstrap>",
+            "<frozen importlib._bootstrap_external>",
+            __file__,
+            __file__.replace(f"_internal{_path_sep}__init__.py", "__init__.py")
+    ):
+        continue
+    break
+
+
+__tracker__.set_trace(_f)
+__tracker__.set_profile()
+
+del _f, _path_sep, i
 
 
 __NAME__ = ''  # real value of type str assigned later at runtime

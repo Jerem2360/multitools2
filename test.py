@@ -1,21 +1,10 @@
-import builtins
-import ctypes
-import _ctypes
-import os
-import _winapi
 import sys
-import cffi
-import struct
+from multitools2 import _internal
 
-from multitools2._internal import dllimport
-
-class C:
-    def __init__(self, dtype, data):
-        self._as_parameter_ = dtype, data, None
+print(sys._getframe().f_trace)
 
 
-
-hdll = dllimport.dlopen("C:/Windows/system32/kernel32.dll", 0)
+"""hdll = dllimport.dlopen("C:/Windows/system32/kernel32.dll", 0)
 
 hfunction = dllimport.dlsym(hdll, "GetProcAddress")
 
@@ -29,7 +18,7 @@ res = _ctypes.call_function(hfunction, (C('P', hdll), b"GetProcAddress\x00"))
 res = res.to_bytes(8, sys.byteorder)
 res = int.from_bytes(res, sys.byteorder, signed=False)
 print(res, hfunction)
-print(res, ctypes.FormatError())
+print(res, ctypes.FormatError())"""
 
 
 """import struct

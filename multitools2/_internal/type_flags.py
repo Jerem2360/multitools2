@@ -1,6 +1,6 @@
 """
 Internal utililty allowing to access a type's flags from
-python code.
+python code. ** AHEM, this is completely useless (type.__flags__) **
 
 Note:
     Allowing modification of these flags could easily cause the
