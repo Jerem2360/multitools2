@@ -137,8 +137,10 @@ def _build_traceback(frame, excluded_frames):
     tb = None
 
     while True:
-        if id(frame) not in excluded_frames:
+        useless = frame.f_code.co_filename.startswith('<') and frame.f_code.co_filename.endswith('>')
+        if (not useless) and id(frame) not in excluded_frames:
             tb = types.TracebackType(_next, frame, frame.f_lasti, frame.f_lineno)
+
             _next = tb
         frame = frame.f_back
         if frame is None:
@@ -148,6 +150,15 @@ def _build_traceback(frame, excluded_frames):
 
 
 def _excepthook(exc_type, exc_value, _traceback):
+    if isinstance(exc_value.__cause__, _ConfigHolder):
+        config = exc_value.__cause__._config
+        exc_value.__configuration__ = exc_value.__cause__
+        exc_value.__cause__ = config.cause
+
+        exc_value.__configuration__._etype = exc_type
+
+        _build_config(exc_value)
+
     # print(dir(exc_value))
     # Error modifying machinery.
     # If an exception is raised where it shouldn't be,
@@ -214,6 +225,16 @@ def _err_depth(err: BaseException, depth=0, cause=None):
     return err
 
 
+def _exc_frame(tb):
+    """
+    Return most recent frame of a traceback.
+    """
+    while True:
+        if tb.tb_next is None:
+            return tb.tb_frame
+        tb = tb.tb_next
+
+
 class _FrameHider:
     def __enter__(self):
         try:
@@ -226,8 +247,16 @@ class _FrameHider:
         if self._frame is None:
             return
         if exc_type or exc_val or exc_tb:
+            if not isinstance(exc_val.__cause__, _ConfigHolder):
+                frame = _exc_frame(exc_tb)
+
+                cnf = ExceptionConfiguration()
+                cnf.cause = exc_val.__cause__
+                exc_val.__cause__ = _ConfigHolder(cnf, frame)
             return
-        _excluded_frames.pop(_excluded_frames.index(id(self._frame)))
+        try:
+            _excluded_frames.pop(_excluded_frames.index(id(self._frame)))
+        except: pass
 
 
 # public members:

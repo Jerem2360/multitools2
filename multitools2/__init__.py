@@ -2,11 +2,14 @@ import types
 import sys
 
 from . import _internal
-from ._internal import _errors as _err
 
-
+# avoid circular import in _internal.errors
 _internal.__NAME__ = __name__
 _internal.__ROOT__ = sys.modules[__name__]
+
+from ._internal import errors as _err
+
+
 
 
 def excepthook(etype: type[BaseException], evalue: BaseException, tb: types.TracebackType):

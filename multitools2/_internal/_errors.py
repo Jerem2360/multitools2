@@ -7,7 +7,6 @@ mechanisms.
 import sys
 import types
 
-from . import runtime
 from . import hooks
 
 
@@ -88,6 +87,7 @@ class HideFrame:
     as expected, no traceback will be printed.
     """
     def __init__(self, _d=0):
+        from . import runtime
         self._frame = runtime.call_stack[_d+1]
 
     def __enter__(self):
@@ -129,6 +129,7 @@ class ExceptionManager:
         self._fn = fn
 
     def __call__(self, cause=None, *args, **kwargs):
+        from . import runtime
         frame = runtime.call_stack[1]
         config = self._fn(*args, **kwargs)
         if not isinstance(config, ExceptionConfiguration):

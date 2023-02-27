@@ -12,6 +12,11 @@ __all__ = [
     'MS_WIN64',
     'ANDROID',
     '__APPLE__',
+
+    'POS_ARG_ERR',
+    'TYPE_ERR',
+    'NOT_CALLABLE_ERR',
+    'ATTRIBUTE_ERR',
 ]
 
 
@@ -29,4 +34,11 @@ MS_WIN64 = MS_WIN32 and IS_SYSTEM_x64  # if the host is a Windows x64 machine
 ANDROID = hasattr(sys, 'getandroidapilevel')
 
 __APPLE__ = sys.platform == "darwin"  # if the host is a MacOSx machine
+
+
+# exception messages:
+POS_ARG_ERR = "{0} accepts {1} positional argument(s), but {2} were given."
+TYPE_ERR = "Expected type '{0}', got '{1}' instead."
+NOT_CALLABLE_ERR = "'{0}' object is not callable."
+ATTRIBUTE_ERR = "'{0}' object has no attribute '{1}'."
 

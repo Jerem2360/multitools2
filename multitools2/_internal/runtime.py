@@ -1,4 +1,5 @@
 import gc
+import os.path
 import types
 from itertools import count
 import sys
@@ -73,6 +74,26 @@ def get_instances(cls):
         if isinstance(ob, cls):
             res.append(ob)
     return res
+
+
+def get_file_directory(file=None):
+    """
+    Return a file's directory.
+    If file is unspecified, the current module is used
+    instead. In that case, if the current module is not a file,
+    FileNotFoundError is raised.
+    """
+    if file is None:
+        frame = call_stack[1]
+        file = frame.f_code.co_filename
+    if file is None:
+        raise FileNotFoundError("Current module is not a python file or package.")
+    file = file.replace('/', os.path.sep)
+    if file.startswith('<') and file.endswith('>'):
+        raise FileNotFoundError("Current module is not a python file or package.")
+    fn = file.split(os.path.sep)[-1]
+    fd = file.removesuffix(fn)
+    return fd
 
 
 class Stack:

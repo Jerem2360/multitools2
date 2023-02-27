@@ -18,6 +18,7 @@ TPFLAGS_IS_ABSTRACT = 1 << 20
 
 
 def flags(cls):
+    # to do use type.__flags__ instead
     if not isinstance(cls, type):
         return 0
     cls_p = ctypes.cast(id(cls), ctypes_defs._typeobject_p)

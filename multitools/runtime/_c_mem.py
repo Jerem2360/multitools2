@@ -28,5 +28,5 @@ else:
 
 
 @dllimport("kernel32", callconv=__stdcall)
-def CreateFileMapping()
+def CreateFileMapping() -> int: ...
 
