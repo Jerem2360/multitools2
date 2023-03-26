@@ -28,13 +28,12 @@ class Interface_Type(type):
         impl = cls.__check_instance__(instance)
         if impl is NotImplemented:
             impl = True
-
             for req in cls.__requirements__:
                 if not hasattr(tp, req):
                     impl = False
                     break
                 attr = getattr(instance, req)
-                if isinstance(attr, (types.FunctionType, MethodWrapper)):
+                if isinstance(attr, (types.FunctionType, types.MethodType, MethodWrapper)):
                     return True
 
                 if not isinstance(attr, type(getattr(cls, req))):
@@ -88,6 +87,10 @@ class SupportsFloat(Interface):
 
 class SupportsBool(Interface):
     def __bool__(self): ...
+
+
+class SupportsBytes(Interface):
+    def __bytes__(self): ...
 
 
 class SupportsGetItem(Interface):

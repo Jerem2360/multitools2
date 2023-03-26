@@ -6,7 +6,7 @@ import typing
 class _C(type): pass
 
 
-_UnionType_Type = type(types.UnionType)
+_UnionType_Type = type(types.UnionType)  # this actually is <class 'type'>
 
 
 frozendict = type(_C('_C', (), {}).__dict__)
@@ -27,7 +27,7 @@ GEN_LIST_LIKE = (list, set, frozenset)
 GEN_MAPPING_LIKE = (dict, frozendict)
 GEN_TYPE_LIKE = (type,)
 GEN_TUPLE_LIKE = (tuple,)
-GEN_UNION_LIKE = (types.UnionType, typing._BaseGenericAlias, _UnionType_Type)
+GEN_UNION_LIKE = (types.UnionType, typing._BaseGenericAlias)  # , _UnionType_Type (this is 'type'!)
 
 
 class Parser:
@@ -67,6 +67,11 @@ class Parser:
 
 
     def parse_arg(self, arg, tp):
+        if tp is None:
+            if arg is not None:
+                return TYPE_ERROR, (type(None), type(arg))
+            return 0, ()
+
         if isinstance(tp, tuple):
             tp = typing.Union[tp]
         if isinstance(tp, (types.GenericAlias, types.UnionType, typing._BaseGenericAlias)):
@@ -99,7 +104,7 @@ class Parser:
                         return etype, (tp, origin[..., eargs[1]])
 
             if origin in GEN_TYPE_LIKE:
-                if not issubclass(arg, tp.__args__[0]):
+                if not self.check_subclass(arg, tp.__args__[0]):
                     return TYPE_ERROR, (tp, origin[arg])
 
             if origin in GEN_TUPLE_LIKE:
@@ -114,10 +119,12 @@ class Parser:
 
             if origin in GEN_UNION_LIKE:
                 _types = tp.__args__
+                # print(origin, origin in GEN_UNION_LIKE)
                 for _tp in _types:
                     etype, eargs = self.parse_arg(arg, _tp)
                     if not etype:
                         return 0, ()
+
                 return TYPE_ERROR, (tp, type(arg))
 
             return 0, ()
@@ -129,6 +136,16 @@ class Parser:
             return TYPE_ERROR, (tp, type(arg))
 
         return 0, ()
+
+    @classmethod
+    def check_subclass(cls, clas, subclass):
+        if isinstance(subclass, types.UnionType):
+            res = False
+            for c in subclass.__args__:
+                res |= cls.check_subclass(clas, c)
+
+            return res
+        return issubclass(clas, subclass)
 
     @classmethod
     def build_error(cls, etype, eargs, fname=None):

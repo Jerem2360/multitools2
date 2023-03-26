@@ -11,10 +11,153 @@ import sys
 import types
 import typing
 
-from . import errors, runtime
+import _ctypes
+
+from . import errors, runtime, type_check
+from .._internal._typeshed import *
+
+
+_T = typing.TypeVar('_T')
 
 
 _declaration_waiting_cache = {}
+
+_dir_singleton = ['__bool__', '__class__', '__delattr__', '__dir__', '__doc__', '__eq__', '__format__', '__getattribute__', '__repr__']
+
+def _ensure_no_arguments(func):
+    if hasattr(func, '__code__'):
+        if func.__code__.co_argcount != 1:
+            raise TypeError(f"Singleton constructors must accept no argument but 'self' or 'cls'.") from errors.configure(depth=1)
+    if hasattr(func, '__text_signature__'):
+        if func.__text_signature__ is None:
+            return
+        arglist_raw = func.__text_signature__.split(', ')
+
+        arglist = []
+        for a in arglist_raw:
+            a = a.removeprefix('(').removesuffix(')')
+            if a not in ('/', '*'):
+                arglist.append(a)
+
+        if len(arglist) != 1:
+            raise TypeError(f"Singleton constructors must accept no argument but 'self' or 'cls'.") from errors.configure(depth=1)
+
+
+class Singleton:
+    """
+    Featureless unique values.
+    Instantiating their types returns themselves.
+    Analog to None, NotImplemented, and such.
+
+    usage:
+
+    example = Singleton(name="example")
+
+    @Singleton
+    class example:
+        ...
+
+
+    Note:
+    If the singleton defines constructors, they must accept no argument.
+    """
+
+    def __new__(cls, body: type = None, /, *, name: str = None) -> object:
+
+        decl_new = object.__new__ if body is None else getattr(body, '__new__', object.__new__)
+
+        with errors.frame_mask:
+            _ensure_no_arguments(decl_new)
+
+        # the singleton's methods:
+        def _repr(self):
+            return type(self).__name__.removesuffix('_t')
+
+        _repr.__name__ = '__repr__'
+
+        def _new(cls):
+            if cls._cache is None:
+                cls._cache = decl_new(cls)  # type: ignore
+            return cls._cache
+
+        _new.__name__ = '__new__'
+
+        def _call(self):
+            with errors.frame_mask:
+                raise TypeError(f"Singleton '{repr(self)}' is not callable")
+
+        _call.__name__ = '__call__'
+
+        def _dir(self):
+            return _dir_singleton
+
+        _dir.__name__ = '__dir__'
+
+        def _bool(self):
+            return True
+
+        _bool.__name__ = '__bool__'
+
+        def _format(self):
+            return repr(self)
+
+        _format.__name__ = '__format__'
+
+        # creating the singleton:
+        if body is None:
+            if name is None:
+                raise TypeError("Singletons must specify a name.") from errors.configure(depth=1)
+
+            _repr.__qualname__ = name + '_t.__repr__'
+            _new.__qualname__ = name + '_t.__new__'
+            _call.__qualname__ = name + '_t.__call__'
+            _dir.__qualname__ = name + '_t.__dir__'
+            _bool.__qualname__ = name + '_t.__bool__'
+            _format.__qualname__ = name + '_t.__format__'
+
+            typeobj = type(name + '_t', (), {'__slots__': (), '__new__': _new, '__call__': _call, '__dir__': _dir, '__bool__': _bool, '__format__': _format})
+        else:
+            _repr.__qualname__ = body.__name__ + '_t.__repr__'
+            _new.__qualname__ = body.__name__ + '_t.__new__'
+            _call.__qualname__ = body.__name__ + '_t.__call__'
+            _dir.__qualname__ = body.__name__ + '_t.__dir__'
+            _bool.__qualname__ = body.__name__ + '_t.__bool__'
+            _format.__qualname__ = body.__name__ + '_t.__format__'
+
+            np = dict(body.__dict__)
+
+            if '__init__' in np:
+                with errors.frame_mask:
+                    _ensure_no_arguments(np['__init__'])
+
+            if '__repr__' not in np:
+                np['__repr__'] = _repr
+            if '__bool__' not in np:
+                np['__bool__'] = _bool
+            if '__format__' not in np:
+                np['__format__'] = _format
+
+            slots = np.get('__slots__', ())
+
+            for n in slots:
+                if (n in np) and isinstance(np[n], MemberDescriptor):
+                    del np[n]
+
+            if is_abstract(body):
+                raise TypeError("Singletons cannot be abstract.") from errors.configure(depth=1)
+
+            kwargs = {} if not isinstance(body, MultiMeta) else getattr(body, '#kwargs', {})
+
+            typeobj = type.__new__(type, body.__name__ + '_t', body.__bases__, {**np, '__module__': body.__module__, '__slots__': slots, '__new__': _new, '__call__': _call, '__dir__': _dir, '__doc__': body.__doc__}, **kwargs)
+            if is_final(body):
+                typeobj = final(typeobj)
+
+        typeobj._cache = None
+
+        try:
+            return typeobj()
+        except:
+            raise TypeError("Singleton constructors must accept no argument but 'self' or 'cls'.") from errors.configure(depth=1)
 
 
 class _ArgWaitingDeclaration(type):
@@ -84,7 +227,7 @@ class _WaitInfo:
         return self._t_globals
 
 
-def abstract(op):
+def abstract(op: _T) -> _T:
     """
     Decorated types and methods are made abstract.
     """
@@ -94,6 +237,35 @@ def abstract(op):
     if isinstance(op, types.FunctionType):
         op.__isabstractmethod__ = True
     return op
+
+
+def final(op: _T) -> _T:
+    """
+    Decorated types can no longer be subclassed.
+    This is checked at runtime.
+    """
+    op.__isfinal__ = True
+    return op
+
+
+def is_abstract(tp: type):
+    """
+    Return whether a given type is abstract or not.
+    Supports custom MultiMeta types as well as builtin and extension
+    abstract types.
+    """
+    if hasattr(tp, '__isabstract__'):
+        return tp.__isabstract__
+    return bool(tp.__flags__ & (1 << 20)) or '__new__' not in tp.__dict__
+
+
+def is_final(tp: type):
+    """
+    Return whether a given type is final or not.
+    Supports custom MultiMeta types as well as builtin and
+    extension final types.
+    """
+    return getattr(tp, '__isfinal__', False) or not (tp.__flags__ & (1 << 10))
 
 
 class _Targ_t(type):
@@ -135,10 +307,6 @@ def _update_name_in_module(op):
     runtime.scope_at(sys.modules[op.__module__])(op)
 
 
-
-_T = typing.TypeVar("_T", covariant=True)
-
-
 class MultiMeta(type):
     __isabstract__ = True
     _fwrd_refs_registry = {}
@@ -146,6 +314,24 @@ class MultiMeta(type):
     def __new__(mcs, name, bases, np, **kwargs):
         from . import errors
         annot = np.get('__annotations__', {})
+
+        _inherit_templates = []
+        _fixed_bases = []
+
+        for b in bases:
+            # support for final types, as well as builtin and extension final types:
+            _final = getattr(b, '__isfinal__', False) or not (b.__flags__ & (1 << 10))
+            if _final:
+                raise TypeError(f"Cannot inherit from final class '{b.__name__}'.") from errors.configure(depth=1)
+
+            if isinstance(b, TemplateType):
+                _fixed_bases.append(b.__source__)
+                _inherit_templates.append(b)
+            else:
+                _fixed_bases.append(b)
+
+        if len(_inherit_templates) > 1:
+            raise TypeError("Cannot inherit from more than one template type.") from errors.configure(depth=1)
 
         if '__tvars__' not in np:
             tvars = {}
@@ -160,12 +346,17 @@ class MultiMeta(type):
 
         np['#kwargs'] = kwargs
 
-
         with errors.frame_mask:
-            cls = type.__new__(mcs, name, bases, np, **kwargs)
+            cls = type.__new__(mcs, name, tuple(_fixed_bases), np, **kwargs)
+
+        cls.__isfinal__ = False
 
         if name in mcs._fwrd_refs_registry:
             cls.register_forward_references(name)
+
+        if len(_inherit_templates):
+            mcs.__init__(cls, name, _fixed_bases, np, **kwargs)
+            return TemplateType(cls, _inherit_templates[0].__argtypes__, {})  # type: ignore
 
         return cls
 
@@ -201,7 +392,11 @@ class MultiMeta(type):
             return type.__call__(cls, *args, **kwargs)
 
     def dup(cls: _T) -> _T:
-        res = type(cls)(cls.__name__, cls.__bases__, dict(cls.__dict__), **getattr(cls, "#kwargs", {}))
+        np = dict(cls.__dict__)
+        for slot in np.get('__slots__', []):
+            if slot in np:
+                del np[slot]
+        res = type(cls)(cls.__name__, cls.__bases__, np, **getattr(cls, "#kwargs", {}))
         return res
 
     def register_forward_references(cls, name):
@@ -231,7 +426,7 @@ class TemplateType(type):
     can appear.
     """
     def __new__(mcs, source, params, kwparams):
-        cls = type.__new__(mcs, source.__name__, (), {'__module__': source.__module__})
+        cls = type.__new__(mcs, source.__name__, (), {'__module__': source.__module__, '_initialized': False})
         return cls
 
     def __init__(cls, source: type[_T], params, kwparams):
@@ -268,6 +463,8 @@ class TemplateType(type):
                 continue
             cls.__tnames__[name] = cls.__argtypes__[i]
             setattr(source, name, d)
+
+        cls._initialized = True
 
     # passing template arguments as template[*args, *kwargs]
     def __getitem__(cls, item) -> type[_T]:
@@ -326,6 +523,25 @@ class TemplateType(type):
     def __repr__(cls):
         return f"<template '{cls.__qualname__}'>"
 
+    def __getattr__(cls, item):
+        return getattr(cls.__source__, item)
+
+    def __setattr__(cls, key, value):
+        super(type(cls), cls).__setattr__(key, value)
+        if not cls._initialized:  # the constructors must not trigger this behaviour
+            return
+        for ttype in cls._typecache.values():
+            setattr(ttype, key, value)
+
+    def __instancecheck__(cls, instance):
+        other_type = type(instance)
+        if not isinstance(other_type, MultiMeta):
+            return False
+        if other_type is cls.__source__:
+            return True
+        other_source = getattr(other_type, '__source__', object)
+        return issubclass(other_source, cls.__source__)
+
     # ref to source.__isabstract__
     @property
     def __isabstract__(cls):
@@ -338,6 +554,14 @@ class TemplateType(type):
     def __isabstract__(cls, value):
         # print("setting abstractness to", value)
         cls.__source__.__isabstract__ = value
+
+    @property
+    def __isfinal__(cls):
+        return cls.__source__.__isfinal__
+
+    @__isfinal__.setter
+    def __isfinal__(cls, value):
+        cls.__source__.__isfinal__ = value
 
     # ref to source.__targs__
     @property
@@ -371,7 +595,7 @@ class TemplateType(type):
 
     @staticmethod
     def _parse_targ(targ, tparam):
-        if isinstance(targ, tparam):
+        if type_check.parse(tparam, targ, raise_=False):
             return True
         if issubclass(tparam, type) and isinstance(targ, _TemplateForwardReference):
             return True

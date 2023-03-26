@@ -18,7 +18,12 @@ __all__ = [
     'ATTRIBUTE_ERR',
 
     'TPFLAGS_HEAPTYPE',
+
+    'scope_at',
+    'trace_opcodes',
 ]
+
+from typing import TypeVar
 
 TPFLAGS_HEAPTYPE = 1 << 9
 
@@ -86,7 +91,7 @@ __DEBUG__ = True
 __ROOT__ = ...  # real value of type module assigned later at runtime
 
 # same as the Py_TRACE_REFS macro of the C api: https://github.com/python/cpython/blob/main/Misc/SpecialBuilds.txt
-__trace_refs__ = hasattr(sys, 'getobjects')
+__trace_refs__ = hasattr(sys, 'getobjects')  # Py_DEBUG
 
 IS_SYSTEM_x64 = sys.maxsize > 2 ** 31 - 1  # if the host machine has a 64-bit system
 
@@ -102,4 +107,26 @@ POS_ARG_ERR = "{0} accepts {1} positional argument(s), but {2} were given."
 TYPE_ERR = "Expected type '{0}', got '{1}' instead."
 NOT_CALLABLE_ERR = "'{0}' object is not callable."
 ATTRIBUTE_ERR = "'{0}' object has no attribute '{1}'."
+
+
+_T = TypeVar('_T')
+
+
+def scope_at(module, scope=''):
+    mod = sys.modules[module]
+    nodes = scope.split('.') if scope else []
+    attr = mod
+    for node in nodes:
+        attr = getattr(attr, node)
+
+    def _inner(target: _T) -> _T:
+        setattr(attr, target.__name__, target)
+        if len(nodes):
+            target.__qualname__ = '.'.join(nodes) + '.' + target.__name__
+        else:
+            target.__qualname__ = target.__name__
+        target.__module__ = module
+        return target
+
+    return _inner
 

@@ -2,6 +2,7 @@ import struct
 import sys
 import weakref
 
+from .._internal import *
 from .._internal.meta import *
 from .._internal import memory
 from .._internal import errors
@@ -70,11 +71,8 @@ class ForeignData(metaclass=ForeignData_Meta):
         """
         Initialize a foreign variable's value, given the packing arguments.
         """
-        data_b = self.__pack__(*data)
-        if len(data_b) > len(self.__memory__):
-            raise OverflowError(f"Data is too large to fit in this type.") from errors.configure(depth=1)
+        self.__pack__(*data, _mem=self.__memory__.view())
 
-        self.__memory__[:len(data_b)] = data_b
 
     def __init_subclass__(cls, **kwargs):
         """
@@ -94,13 +92,22 @@ class ForeignData(metaclass=ForeignData_Meta):
                     raise TypeError("Either 'size' or 'struct_type' must be specified for a foreign data type.") from errors.configure(depth=1)
                 raise TypeError(f"Invalid struct format '{cls.__struct_type__}'") from errors.configure(depth=1)
 
+    def __repr__(self):
+        return f"<extern \"C\" ({type(self).__name__}){repr(self.as_object())}>"
+
     @classmethod
-    def __pack__(cls, *data):
+    def __pack__(cls, *data, _mem=None):
         """
         Implement data packing.
-        This converts the arguments into usable bytes.
+        This converts the arguments into usable bytes. If _mem
+        is provided, the bytes are directly packed into it.
         """
-        return struct.pack(cls.__struct_type__, *data)
+        if _mem is None:
+            return struct.pack(cls.__struct_type__, *data)
+        try:
+            struct.pack_into(cls.__struct_type__, _mem, 0, *data)
+        except struct.error as e:
+            raise ValueError(*e.args) from errors.configure(depth=1)
 
     @classmethod
     def __unpack__(cls, buffer):
@@ -148,10 +155,28 @@ class ForeignData(metaclass=ForeignData_Meta):
         return NotImplemented
 
     @classmethod
+    def __ptr_from_obj__(cls, tp, source):
+        """
+        Customizable Pointer initializing hook.
+        Allows to customize pointer arguments.
+
+        Must return a tuple of (address, ref)
+        where address is the pointer's target,
+        ref is a reference to keep the target
+        alive. If ref is None, the pointer
+        cannot be dereferenced.
+        """
+        return NotImplemented
+
+    @classmethod
     def from_memory(cls, _mem):
+        """
+        Store foreign data of type cls into the given memory
+        block.
+        """
         type_check.parse(memory.Memory, _mem)
         self = cls.__new__(cls)
-        self.__memory__ = _mem
+        self.__memory__ = _mem.get_segment(range(cls.__size__)) if len(_mem) >= cls.__size__ else _mem
         return self
 
 
@@ -189,14 +214,24 @@ class void(metaclass=ForeignData_Meta):
     def as_object(self) -> tuple[object] | object:
         """
         There exists no python equivalent to void.
+        ## maybe NoneType should be returned
         """
-        return NotImplemented
+        return type(None)  # NotImplemented
 
     @classmethod
     def __ptr_as_obj__(cls, address) -> object:
-        return NotImplemented
+        """
+        Pointer[void].as_object() -> the address pointed to by the pointer.
+        """
+        return address
 
-
+    @classmethod
+    def __ptr_from_obj__(cls, ptr_type, source) -> tuple[int, object]:
+        """
+        Pointer[void] should be initialized from an integer address.
+        Pointer[void] cannot be dereferenced.
+        """
+        return source, None
 
 
 @template(ptype=ForeignData_Meta)

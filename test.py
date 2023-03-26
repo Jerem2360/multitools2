@@ -1,7 +1,14 @@
 import sys
-from multitools2 import _internal
 
-print(sys._getframe().f_trace)
+from multitools2.interop2 import *
+from multitools2._internal import meta
+
+
+data = Array[Pointer[void], 5](10, 11, 12, 13, 14)
+
+data[0] = 133
+
+print(data[0])
 
 
 """hdll = dllimport.dlopen("C:/Windows/system32/kernel32.dll", 0)

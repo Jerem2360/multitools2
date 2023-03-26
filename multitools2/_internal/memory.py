@@ -1,15 +1,138 @@
 import ctypes
 import sys
+from typing import overload
+from typing import Any as _IGNORE  # tell type checkers to ignore the type of what's annotated
 
 from .errors import configure
 from . import POS_ARG_ERR, TYPE_ERR
 from .type_check import parse
 from .interface import Buffer, SupportsIndex
 from .. import *
+from . import *
 
 
 _PyBUF_READ = 0x100
 _PyBUF_WRITE = 0x200
+
+
+ctypes.pythonapi.PyMemoryView_FromMemory.argtypes = ctypes.c_void_p, ctypes.c_ssize_t, ctypes.c_int
+ctypes.pythonapi.PyMemoryView_FromMemory.restype = ctypes.py_object
+
+
+class SegvType:
+    __read__ = None
+    __write__ = None
+    __none__ = None
+
+    def __new__(cls, *args, **kwargs):
+        self = super().__new__(cls)
+        self._name = 'none'
+        return self
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("Type 'SegvType' cannot be instantiated.") from configure(depth=1)
+
+    def __repr__(self):
+        return f"<SegvType '{self._name}'>"
+
+    def __bool__(self):
+        return self._name != 'none'
+
+    @classmethod
+    def from_OSError(cls, exc) -> 'SegvType':
+        if len(exc.args) and isinstance(exc.args[0], str):
+            if exc.args[0].startswith('exception: access violation reading'):
+                return cls.read  # type: ignore
+            if exc.args[0].startswith('exception: access violation writing'):
+                return cls.write  # type: ignore
+        return cls.none  # type: ignore
+
+    @property
+    def verb(self):
+        match self._name:
+            case 'read':
+                return 'reading'
+            case 'write':
+                return 'writing'
+            case _:
+                return 'none'
+
+    @property
+    def type(self):
+        return self._name
+
+    @classmethod
+    @property
+    def read(cls):
+        if cls.__read__ is None:
+            cls.__read__ = cls.__new__(cls)
+            cls.__read__._name = 'read'
+        return cls.__read__
+
+    @classmethod
+    @property
+    def write(cls):
+        if cls.__write__ is None:
+            cls.__write__ = cls.__new__(cls)
+            cls.__write__._name = 'write'
+        return cls.__write__
+
+    @classmethod
+    @property
+    def none(cls):
+        if cls.__none__ is None:
+            cls.__none__ = cls.__new__(cls)
+        return cls.__none__
+
+
+@scope_at(__NAME__)
+class AccessViolationError(MemoryError):
+    def __init__(self, address, segv_type):
+        formatted = f"{segv_type.verb} at 0x{hex(address).removeprefix('0x').zfill(16).upper()}."
+        super().__init__(formatted)
+        self.address = address
+        self.segv_type = segv_type
+        self.formatted = formatted
+
+
+def _validate_address(address) -> SegvType:
+    if address < (256 ** 4):   # addresses of 4 bytes or fewer are usually not readable
+        return SegvType.read  # type: ignore
+
+    to_test = ctypes.cast(ctypes.c_void_p(address), ctypes.POINTER(ctypes.c_char))  # address to test is converted to char*
+    temp = ctypes.create_string_buffer(0, 1)  # temporary copy buffer
+
+    try:
+        # we use memcpy to trigger an eventual access violation
+        ctypes.cdll.msvcrt.memcpy(temp, to_test, 1)
+    except OSError as e:
+        msg = e.args
+        if (len(msg) > 0) and isinstance(msg[0], str):
+            if msg[0].startswith('exception: access violation reading'):
+                # you can write only if you can read. Reverse is not true.
+                return SegvType.read  # type: ignore
+        raise
+
+    try:
+        # use memcpy the other way to trigger eventual writing access violation: we need to test for readonly memory
+        ctypes.cdll.msvcrt.memcpy(to_test, temp, 1)
+    except OSError as e:
+        msg = e.args
+        if (len(msg) > 0) and isinstance(msg[0], str):
+            if msg[0].startswith('exception: access violation writing'):
+                return SegvType.write  # type: ignore
+
+        raise
+
+    return SegvType.none  # type: ignore
+
+
+def _validate_memory_block(address, size):
+    for i in range(address, address + size):
+        res = _validate_address(i)
+        if res:
+            return res
+    return SegvType.none
 
 
 def _my_hex(x):
@@ -133,6 +256,18 @@ class Memory:
     However, you can do anything you want with a Memory
     object that owns its memory block.
     """
+    @overload
+    def __init__(self, size: int, auto_free: bool = True) -> None:
+        """
+        Allocate a new memory block of size bytes.
+        """
+    @overload
+    def __init__(self, source: Buffer | object, auto_free: bool = True) -> None:
+        """
+        Wrap source with a Memory object.
+        'source' must support the buffer protocol and be writable.
+        """
+
     def __init__(self, *args, **kwargs):
         """
         Memory(integer_size) -> View on freshly allocated memory.
@@ -216,7 +351,12 @@ class Memory:
         except:
             pass
 
-    def __getitem__(self, item):
+    @overload
+    def __getitem__(self, item: int | SupportsIndex) -> int: ...
+    @overload
+    def __getitem__(self, item: slice) -> list[int]: ...
+
+    def __getitem__(self, item) -> _IGNORE:
         """
         Implement self[item]
         """
@@ -232,6 +372,11 @@ class Memory:
             return list(i for i in mv)
 
         return self._view[item.__index__()]
+
+    @overload
+    def __setitem__(self, key: int | SupportsIndex, value: int | bytes | SupportsIndex) -> None: ...
+    @overload
+    def __setitem__(self, key: slice, value: bytes | list[int | SupportsIndex]) -> None: ...
 
     def __setitem__(self, key, value):
         """
@@ -263,7 +408,7 @@ class Memory:
 
         self._view[key.__index__()] = value.__index__()
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: int | SupportsIndex | slice):
         """
         Implement del self[item]
         """
@@ -322,6 +467,57 @@ class Memory:
         self._ensure_alive(1)
         return self._view
 
+    def get_segment(self, segment: slice | range):
+        """
+        Return the given segment of the memory.
+        """
+        parse(slice | range, segment)
+        try:
+            mem = self._view[segment.start:segment.stop:segment.step]
+        except Exception as e:
+            raise e from configure(depth=1)
+        return Memory(mem, auto_free=False)
+
+    def copy(self):
+        """
+        Copy the bytes stored here into a newly allocated memory block.
+        """
+        res = Memory(len(self))
+        res[:] = self[:]
+        return res
+
+    @classmethod
+    def at_address(cls, address: int | SupportsIndex, size: int | SupportsIndex, auto_free=True):
+        """
+        Wrap the memory block at given address with given size.
+        Access violations are handled and are replaced with AccessViolationError
+
+        **Caution: Using this function inappropriately can break the interpreter.
+        Only use when you know exactly what you're doing.**
+        """
+        parse(SupportsIndex, SupportsIndex, bool, address, size, auto_free)
+        segv_type = _validate_memory_block(address.__index__(), size.__index__())
+        if segv_type:
+            raise AccessViolationError(address, segv_type) from configure(depth=1)
+
+        result = cls.__new__(cls)
+        result._do_free = auto_free
+
+        try:
+            result._view = ctypes.pythonapi.PyMemoryView_FromMemory(
+                ctypes.c_void_p(address.__index__()),
+                ctypes.c_ssize_t(size.__index__()),
+                ctypes.c_int(_PyBUF_WRITE)
+            )
+        except OSError as e:
+            segv_type = SegvType.from_OSError(e)
+            if segv_type:
+                raise AccessViolationError(address.__index__(), segv_type) from configure(depth=1)
+
+        result._buf = None
+        return result
+
+
     def release(self):
         """
         Release the memory and buffers associated with it.
@@ -346,7 +542,7 @@ class Memory:
         return self._buf.buf
 
     @property
-    def obj(self):
+    def obj(self) -> Buffer | None:
         """
         The object from which the memory was borrowed if it
         is not owned, else None.
@@ -362,5 +558,4 @@ class Memory:
             return obj_.value
         except:
             return None
-
 
