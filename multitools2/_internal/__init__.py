@@ -1,6 +1,11 @@
 import sys
 
 
+"""
+Internal API.
+"""
+
+
 __all__ = [
     '__NAME__',
     '__DEBUG__',
@@ -27,10 +32,23 @@ from typing import TypeVar
 
 TPFLAGS_HEAPTYPE = 1 << 9
 
-STATIC_OBJECTS = [
+STATIC_OBJECTS = [   # allows to search for static objects when 'de-pointering' PyObject pointers.
     b'',
     '',
+    None,
+    NotImplemented,
+    Ellipsis,
+    True,
+    False,
 ]
+
+from . import _objlist
+
+for _sobj in _objlist._static_objects():
+    if _sobj not in STATIC_OBJECTS:
+        STATIC_OBJECTS.append(_sobj)
+
+del _objlist
 
 from . import _trace
 
@@ -56,6 +74,9 @@ def __tracker__(frame, event, args):
     for tracker in trackers:
         if callable(tracker):
             tracker(frame, event, args)
+
+    if (type(args) not in STATIC_OBJECTS) and not (type(args).__flags__ & TPFLAGS_HEAPTYPE):
+        STATIC_OBJECTS.append(type(args))
 
 
 del _trace

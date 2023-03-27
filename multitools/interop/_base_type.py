@@ -240,7 +240,7 @@ class CType(metaclass=CTypeMeta):
     - __simple_type__ optionally provides an accurate struct format for the type if possible and in case __type__ is not accurate.
 
     Note that upon class creation, __simple__ is copied and then stored as an object.
-    If __supports_byteorder__ is False, with_byteorder() will return an exact copy of cls.
+    If __supports_byteorder__ is False, with_byteorder() will return an exact copy of t_instance.
 
     Overriding the __init__ constructor of a CType subclass requires calling the __init__ constructor
     of the super class.
@@ -294,8 +294,8 @@ class CType(metaclass=CTypeMeta):
     def __to_ctypes__(self):
         """
         Default implementation.
-        Returns None if cls does not support __simple__.
-        Otherwise, it calls the from_buffer() method of cls.__simple__
+        Returns None if t_instance does not support __simple__.
+        Otherwise, it calls the from_buffer() method of t_instance.__simple__
         and returns its result.
         """
         if self.__type__ == '*':

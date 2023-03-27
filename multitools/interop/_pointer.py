@@ -33,7 +33,7 @@ class PointerType(_CTypeMeta):
         cls = super().__new__(mcs, name, bases, np, **kwargs)
         cls.__p_type__ = ptype
         cls.__name__ = (cls.__p_type__.__name__ if cls.__p_type__ is not None else 'void') + '*'
-        # print(cls)
+        # print(t_instance)
         return cls
 
     @property
@@ -97,7 +97,7 @@ class Pointer(_CType, metaclass=PointerType):
     @classmethod
     def __template__(cls, tp):
         """
-        Implement cls[*args]
+        Implement t_instance[*args]
         """
         # here, tp is guaranteed to be a type, as specified by
         # the @generic() declaration.

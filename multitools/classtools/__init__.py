@@ -20,8 +20,8 @@ def generic(cls, *types):
 
     @generic(type1, type2, ...)
     class C(metaclass=MultiMeta):
-        def __template__(cls, arg1: type1, arg2: type2, ...):
-            res = cls.copy(cls)
+        def __template__(t_instance, arg1: type1, arg2: type2, ...):
+            res = t_instance.copy(t_instance)
             # do stuff
             return res
 

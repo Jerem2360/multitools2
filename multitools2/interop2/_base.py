@@ -44,11 +44,22 @@ class ForeignData(metaclass=MultiMeta):
         return self
 
     def __init__(self, *data):
+        """
+        Initialize a foreign variable, given arguments.
+        This gets called each time the instances value is set
+        by python code.
+        """
         self.__pack__(*data, buffer=self.__memory__.view())
 
     def __init_subclass__(cls, **kwargs):
+        """
+        Initialize a foreign data type.
+        """
         size = kwargs.get('size', None)
         type_ = kwargs.get('type', None)
+
+        if getattr(cls, '__size__', 0) and getattr(cls, '__type__', ''):
+            return
 
         if (size is None) and (type_ is not None):
             try:
@@ -90,27 +101,52 @@ class ForeignData(metaclass=MultiMeta):
         return res
 
     @classmethod
-    def __pointer_as_object__(cls, pointer) -> object:
+    def __pointer_as_object__(cls, pointer, address) -> object:
+        """
+        Convert a pointer to this type to a python object.
+        Return value of None means NULL.
+        Default behaviour uses the object's address.
+        """
         return NotImplemented
 
     @classmethod
     def __pointer_from_object__(cls, obj) -> int:
+        """
+        Convert a python object to a pointer to this type.
+        An integer address must be returned.
+        """
         return NotImplemented
 
     def update(self, buffer):
+        """
+        Update the object's memory from a given buffer.
+        Data is copied.
+        """
         type_check.parse(SupportsBytes, buffer)
         if len(buffer) != type(self).__size__:
             raise ValueError("Memory must be updated with data of the same length.") from configure(depth=1)
         self.__memory__[:] = bytes(buffer)
 
     def set(self, *args):
-        self.__pack__(*args, buffer=self.__memory__.view())
+        """
+        Set the value of self.
+        args must match the same pattern as for __init__.
+        """
+        with errors.frame_mask:
+            self.__init__(*args)
 
     def as_object(self) -> object:
+        """
+        Convert self to a python object.
+        """
         return self.__unpack__(self.__memory__)
 
     @classmethod
     def from_memory(cls, mem):
+        """
+        Initialize a new instance from already allocated memory.
+        BufferUnderflowError is raised if the buffer is too small.
+        """
         type_check.parse(memory.Memory, mem)
         self = cls.__new__(cls)
         if len(mem) > cls.__size__:
@@ -125,9 +161,10 @@ class ForeignData(metaclass=MultiMeta):
 @scope_at(_INTEROP_NAME)
 @final
 class void(ForeignData, size=0):
-    def __init_subclass__(cls, **kwargs):
-        raise TypeError("Cannot inherit from final class 'void'.") from configure(depth=1)
-
+    """
+    The 'void' type. It is only allowed as a template
+    argument to the Pointer class.
+    """
     @classmethod
     def __pack__(cls, *data, buffer=None):
         type_check.parse(Buffer | None, buffer)

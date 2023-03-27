@@ -3,9 +3,16 @@ Expected functionalities:
 
 - @template([name=]<type>, [name=][<type>, <default>]) <class>
 - @abstract  <class | method>
-- <class>.dupe() -> class
+- <class>.dupe() -> copy of class
 - <class>.__template__ hook
--
+- @static
+- @final
+
+template inheritance:
+- parameters: inherited from the closest template base class (priority on overrides using @template)
+- argument refs: inherited from the closest template base class (priority on overrides using @template)
+- cached types: inherit the corresponding cached type of the closest template base class, create it if non-existent
+
 """
 import sys
 import types
@@ -27,7 +34,7 @@ _dir_singleton = ['__bool__', '__class__', '__delattr__', '__dir__', '__doc__', 
 def _ensure_no_arguments(func):
     if hasattr(func, '__code__'):
         if func.__code__.co_argcount != 1:
-            raise TypeError(f"Singleton constructors must accept no argument but 'self' or 'cls'.") from errors.configure(depth=1)
+            raise TypeError(f"Singleton constructors must accept no argument but 'self' or 't_instance'.") from errors.configure(depth=1)
     if hasattr(func, '__text_signature__'):
         if func.__text_signature__ is None:
             return
@@ -40,7 +47,17 @@ def _ensure_no_arguments(func):
                 arglist.append(a)
 
         if len(arglist) != 1:
-            raise TypeError(f"Singleton constructors must accept no argument but 'self' or 'cls'.") from errors.configure(depth=1)
+            raise TypeError(f"Singleton constructors must accept no argument but 'self' or 't_instance'.") from errors.configure(depth=1)
+
+
+def _highest_template(cls):
+
+    for base in cls.mro():
+        print(base, cls)
+        if base is cls:
+            continue
+        if isinstance(base, TemplateType):
+            return base
 
 
 class Singleton:
@@ -157,7 +174,7 @@ class Singleton:
         try:
             return typeobj()
         except:
-            raise TypeError("Singleton constructors must accept no argument but 'self' or 'cls'.") from errors.configure(depth=1)
+            raise TypeError("Singleton constructors must accept no argument but 'self' or 't_instance'.") from errors.configure(depth=1)
 
 
 class _ArgWaitingDeclaration(type):
@@ -426,48 +443,72 @@ class TemplateType(type):
     can appear.
     """
     def __new__(mcs, source, params, kwparams):
-        cls = type.__new__(mcs, source.__name__, (), {'__module__': source.__module__, '_initialized': False})
+        if type_check.parse(str, tuple, dict, source, params, kwparams, raise_=False):  # a new class is being created, so create also __source__
+
+            np = {'_initialized': False}
+            if '__module__' in kwparams:
+                np['__module__'] = kwparams['__module__']
+
+            cls = type.__new__(mcs, source, params, np)
+        else:
+            cls = type.__new__(mcs, source.__name__, (), {'__module__': source.__module__, '_initialized': False})
         return cls
 
     def __init__(cls, source: type[_T], params, kwparams):
-        cls.__source__ = source
-        cls._typecache = {None: source}
+        if type_check.parse(str, tuple, dict, source, params, kwparams, raise_=False):
+            base_sources = []
+            for b in params:
+                if isinstance(b, TemplateType):
+                    base_sources.append(b.__source__)
+                    continue
+                base_sources.append(b)
+
+            cls.__source__ = type(source, tuple(base_sources), kwparams)
+            _annot_temp = kwparams.get('__annotations__', {})
+            _annot = {}
+            for k, v in _annot_temp.items():
+                if isinstance(v, type):
+                    _annot[k] = v
+            cls._typecache = {None: cls.__source__}
+            _inherit_template = _highest_template(cls)
+            if _inherit_template is None:
+                cls.__argtypes__ = None  # incomplete template type, awaiting call to an '@template'
+                cls.__tnames__ = None
+            else:
+                cls.__argtypes__ = _inherit_template.__argtypes__
+                cls.__tnames__ = _inherit_template.__tnames__
+        else:
+            cls.__source__ = source
+            _annot = source.__annotations__
+            cls._typecache = {None: source}
+            cls.__argtypes__ = list([*params, *kwparams.values()])
+
+            cls.__tnames__ = {}
+            i = -1
+            for name, tp in _annot.items():
+                i += 1
+                if hasattr(source, name):
+                    continue
+                if i >= len(cls.__argtypes__) or i < 0:
+                    continue
+                d = None
+                real_tp = cls.__argtypes__[i]
+                if isinstance(real_tp, list) and len(real_tp) == 2:
+                    real_tp, d = real_tp
+                if real_tp != tp:
+                    continue
+                cls.__tnames__[name] = cls.__argtypes__[i]
+                setattr(source, name, d)
+
         cls._frefs_typecache = {}
-        cls.__argtypes__ = list([*params, *kwparams.values()])
-        """cls.__name__ = cls.__source__.__name__ + '['
-        cls.__qualname__ = cls.__source__.__qualname__ + '['
-        for t in cls.__argtypes__:
-            if isinstance(t, list) and len(t) == 2:
-                t, d = t
-            cls.__name__ += (t.__name__ + ', ')
-            cls.__qualname__ += (t.__name__ + ', ')
-
-        cls.__name__ = cls.__name__.removesuffix(', ') + ']'
-        cls.__qualname__ = cls.__qualname__.removesuffix(', ') + ']'"""
         cls.__module__ = cls.__source__.__module__
-
-        cls.__tnames__ = {}
-        _annot = source.__annotations__
-        i = -1
-        for name, tp in _annot.items():
-            i += 1
-            if hasattr(source, name):
-                continue
-            if i >= len(cls.__argtypes__) or i < 0:
-                continue
-            d = None
-            real_tp = cls.__argtypes__[i]
-            if isinstance(real_tp, list) and len(real_tp) == 2:
-                real_tp, d = real_tp
-            if real_tp != tp:
-                continue
-            cls.__tnames__[name] = cls.__argtypes__[i]
-            setattr(source, name, d)
 
         cls._initialized = True
 
     # passing template arguments as template[*args, *kwargs]
     def __getitem__(cls, item) -> type[_T]:
+        if None in (cls.__argtypes__, cls.__tnames__):
+            raise TypeError("Templates must specify arguments unless inheriting an existing template.") from errors.configure(depth=1)
 
         if not isinstance(item, tuple):
             item = (item,)
@@ -528,6 +569,7 @@ class TemplateType(type):
 
     def __setattr__(cls, key, value):
         super(type(cls), cls).__setattr__(key, value)
+        # print(t_instance, t_instance._initialized)
         if not cls._initialized:  # the constructors must not trigger this behaviour
             return
         for ttype in cls._typecache.values():
@@ -586,10 +628,9 @@ class TemplateType(type):
     @staticmethod
     def _get_tvar_name(gi_result, i):
         result = None
-
         try:
             result = gi_result.__tvars__[i]
-        except IndexError or KeyError:
+        except KeyError:
             pass
         return result
 
@@ -641,5 +682,15 @@ def template(*params, **kwparams):
     @template(type, type1, type2)
     class C: ...
     """
-    return lambda op: TemplateType(op, params, kwparams)
+    def _inner(op):
+        if isinstance(op, TemplateType):
+            if op.__argtypes__ is None:
+                op.__argtypes__ = list([*params, *kwparams.values()])
+            else:
+                op.__argtypes__ = list([*op.__argtypes__, *params, *kwparams.values()])
+            if op.__tnames__ is None:
+                op.__tnames__ = {}
+            return op
+        return TemplateType(op, params, kwparams)
+    return _inner  # type: ignore
 

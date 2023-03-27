@@ -69,8 +69,8 @@ def generic(cls, *types):
 
     @generic(type1, type2, ...)
     class C(metaclass=MultiMeta):
-        def __template__(cls, arg1: type1, arg2: type2, ...):
-            res = cls.copy(cls)
+        def __template__(t_instance, arg1: type1, arg2: type2, ...):
+            res = t_instance.copy(t_instance)
             # do stuff
             return res
 
@@ -342,7 +342,7 @@ class MultiMeta(type):
 
         setattr(cls, __REVERSED__, False)
 
-        base = cls.mro()[1]  # __mro__ = (cls, base, base.__base__, ...)
+        base = cls.mro()[1]  # __mro__ = (t_instance, base, base.__base__, ...)
 
         # friendship management:
         if friends is None:
@@ -377,7 +377,7 @@ class MultiMeta(type):
         cls.__abstract__ = False
         cls.__abstracts__ = abs_attrs
 
-        # print(cls.__dict__)
+        # print(t_instance.__dict__)
         for k, v in cls.__dict__.items():
             if getattr(v, __ISABSTRACTMETHOD__, False):
                 cls.__abstract__ = True
@@ -385,7 +385,7 @@ class MultiMeta(type):
                 if not isinstance(v, _AbstractMethod):
                     setattr(cls, k, _AbstractMethod(v))
             elif getattr(v, __ISABSTRACT__, False):
-                # print(k, v, cls)
+                # print(k, v, t_instance)
                 cls.__abstract__ = True
                 cls.__abstracts__.append(k)
                 if not isinstance(v, _AbstractField):
@@ -400,7 +400,7 @@ class MultiMeta(type):
 
     def __setattr__(cls, key, value):
         """
-        Implement setattr(cls, key, value)
+        Implement setattr(t_instance, key, value)
         Disallow modifying read-only fields.
         """
         is_creating = getattr(cls, __CREATION__, False)
@@ -421,7 +421,7 @@ class MultiMeta(type):
 
     def __copy__(cls):
         """
-        Implement copy.copy(cls)
+        Implement copy.copy(t_instance)
         """
         _D_COPY.print("running 'copy'...")
         res = type(cls)(cls.__name__, cls.__bases__, dict(cls.__dict__).copy(), generic=cls.__generic__, _copy=True)
@@ -429,7 +429,7 @@ class MultiMeta(type):
 
     def __deepcopy__(cls, memodict={}):
         """
-        Implement copy.deepcopy(cls, memodict={})
+        Implement copy.deepcopy(t_instance, memodict={})
         Normally, metatypes' copy callbacks are ignored, except
         for MultiMeta and its subclasses. This is made possible by the internal
         _register_copy_dispatches() helper function.
@@ -456,7 +456,7 @@ class MultiMeta(type):
 
     def __getitem__(cls, item):
         """
-        Implement cls[*args]
+        Implement t_instance[*args]
 
         This first looks for the template args inside the type's typecache, and
         if the args are found, return the type associated with it, avoiding the re-creation
@@ -474,7 +474,7 @@ class MultiMeta(type):
             return cls
 
         args = (item,) if not isinstance(item, tuple) else item
-        # print(args, cls)
+        # print(args, t_instance)
         if len(args) != len(cls.__generic__):
             raise err_depth(TypeError, POS_ARGCOUNT_ERR_STR.format(f"{cls.__name__}[]", len(cls.__generic__), len(args)), depth=1)
 

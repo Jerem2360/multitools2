@@ -14,9 +14,8 @@ class Array(ForeignData, type='P'):
     alen: TArg[1]
 
     __slots__ = [
-        '__memory__',
         '__contents__',  # arrays keep track of their contents
-        '__length__',  # keep track of the length
+        '__length__',  # and of the length
     ]
 
     def __init__(self, *elements):
@@ -58,6 +57,7 @@ class Array(ForeignData, type='P'):
         return self.atype.from_memory(self.__contents__.get_segment(range(item * self.atype.__size__, (item + 1) * self.atype.__size__)))
 
     def __setitem__(self, key, value):
+        type_check.parse(SupportsIndex, key)
         key = key.__index__()
         if key < 0:
             key += self.__length__
@@ -65,7 +65,7 @@ class Array(ForeignData, type='P'):
             raise IndexError("index out of range.") from configure(depth=1)
 
         if isinstance(value, self.atype):
-            c_value = self.atype
+            c_value = value
         else:
             if not isinstance(value, tuple):
                 value = (value,)
@@ -74,6 +74,33 @@ class Array(ForeignData, type='P'):
 
         self.__contents__[key * self.atype.__size__:(key + 1) * self.atype.__size__] = bytes(c_value.__memory__)
 
+    def __iter__(self):
+        return _ArrayIterator(self)
+
+    def __len__(self):
+        return self.__length__
+
+    def __repr__(self):
+        return f"<C ({type(self).__name__})" + "{" + ', '.join(repr(i.as_object()) for i in self) + "}>"
+
+    def as_object(self) -> object:
+        return list(i.as_object() for i in self)
 
 
+class _ArrayIterator:
+    __slots__ = [
+        '_array',
+        '_position',
+    ]
+
+    def __init__(self, array):
+        self._array = array
+        self._position = 0
+
+    def __next__(self):
+        if self._position >= self._array.__length__:
+            raise StopIteration
+        res = self._array[self._position]
+        self._position += 1
+        return res
 

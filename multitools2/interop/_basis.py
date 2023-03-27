@@ -171,7 +171,7 @@ class ForeignData(metaclass=ForeignData_Meta):
     @classmethod
     def from_memory(cls, _mem):
         """
-        Store foreign data of type cls into the given memory
+        Store foreign data of type t_instance into the given memory
         block.
         """
         type_check.parse(memory.Memory, _mem)

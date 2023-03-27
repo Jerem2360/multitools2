@@ -22,7 +22,7 @@ class Interface_Type(type):
         return cls.__check__(type(instance))
 
     def __instancecheck__(cls, instance):
-        # print(cls, instance)
+        # print(t_instance, instance)
         from ._typeshed import MethodWrapper
         tp = type(instance)
         impl = cls.__check_instance__(instance)

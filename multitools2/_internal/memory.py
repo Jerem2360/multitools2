@@ -1,5 +1,6 @@
 import ctypes
 import sys
+import time
 from typing import overload
 from typing import Any as _IGNORE  # tell type checkers to ignore the type of what's annotated
 
@@ -538,6 +539,8 @@ class Memory:
         except:
             return 0
         if self._buf is None:
+            if self._view.obj is None:
+                return _buffer_get_pointer(self._view)
             return _buffer_get_pointer(self._view.obj)  # we own ourselves, so our buffer object is necessarily a bytearray
         return self._buf.buf
 

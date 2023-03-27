@@ -102,7 +102,7 @@ class Array(CType, metaclass=ArrayType):
     @classmethod
     def __template__(cls, tp, length):
         """
-        Implement cls[tp, length]
+        Implement t_instance[tp, length]
         """
         parse_args((tp, length), type, SupportsIndex, depth=1)
         res = cls.dup_shallow()

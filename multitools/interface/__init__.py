@@ -53,7 +53,7 @@ class Buffer(Interface):
     """
     def __init_subclass__(cls, **kwargs):
         """
-        Implement class X(cls)
+        Implement class X(t_instance)
         """
         raise _errors.err_depth(TypeError, "Cannot implement the buffer protocol in pure python.", depth=1)
 

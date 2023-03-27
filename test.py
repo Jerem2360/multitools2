@@ -1,14 +1,7 @@
 import sys
 
-from multitools2.interop2 import *
-from multitools2._internal import meta
+from multitools2._internal import meta2
 
-
-data = Array[Pointer[void], 5](10, 11, 12, 13, 14)
-
-data[0] = 133
-
-print(data[0])
 
 
 """hdll = dllimport.dlopen("C:/Windows/system32/kernel32.dll", 0)

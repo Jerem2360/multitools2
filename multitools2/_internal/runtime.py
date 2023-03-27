@@ -25,7 +25,7 @@ sys.settrace(_tracefunc)
 
 def is_heaptype(cls):
     """
-    Return whether cls is a Heap type.
+    Return whether t_instance is a Heap type.
     Heap types are allocated on the heap,
     as opposed to static types, which are
     allocated statically.
@@ -57,7 +57,7 @@ def removetrace(fn):
 
 def get_instances(cls):
     """
-    Return a list of all the alive instances of class 'cls'.
+    Return a list of all the alive instances of class 't_instance'.
     """
     res = []
     # Heap type instances count as references to their type,

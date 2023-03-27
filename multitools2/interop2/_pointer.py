@@ -62,11 +62,25 @@ class Pointer(ForeignData, type='P'):
         return res
 
     def __rsub__(self, other):
-        res = type(self).__new__(type(self))
         return other - self.__unpack__(self.__memory__)
 
     def __isub__(self, other):
         return self.__sub__(other)
+
+    def __eq__(self, other):
+        if isinstance(other, type(self)):
+            return self.as_object() == other.as_object()
+        if isinstance(other, SupportsIndex):
+            return self.as_object() == other.__index__()
+        return False
+
+    def __repr__(self):
+        obj = self.as_object()
+        if isinstance(obj, int):
+            return f"<C ({type(self).__name__}){hex(obj)}>"
+        if obj is None:
+            return f"<C ({type(self).__name__})<NULL> >"
+        return f"<C ({type(self).__name__}){obj}>"
 
     def deref(self):
         address = self.__unpack__(self.__memory__)
@@ -75,7 +89,7 @@ class Pointer(ForeignData, type='P'):
         return self.ptype.from_memory(mem)
 
     def as_object(self):
-        impl = self.ptype.__pointer_as_object__(self)
+        impl = self.ptype.__pointer_as_object__(self, self.__unpack__(self.__memory__))
         if impl is NotImplemented:
             return self.__unpack__(self.__memory__)
         return impl
@@ -107,8 +121,11 @@ class Pointer(ForeignData, type='P'):
     @classmethod
     @property
     def null(cls):
+        """
+        NULL 'ptype*' pointer.
+        """
         if cls.__null__ is None:
             cls.__null__ = cls.__new__(cls)
-            cls.__pack__(0, buffer=cls.__null__.__memory__)
+            cls.__pack__(0, buffer=cls.__null__.__memory__.view())
         return cls.__null__
 

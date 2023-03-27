@@ -4,7 +4,16 @@ __all__ = [
     "ForeignData",
     "void",
     "Pointer",
-    "Array"
+    "Array",
+
+    "Short",
+    "UShort",
+    "Int",
+    "UInt",
+    "Long",
+    "ULong",
+    "LongLong",
+    "ULongLong",
 ]
 
 import warnings
@@ -73,4 +82,5 @@ config = _Config()
 from ._base import ForeignData, void
 from ._pointer import Pointer
 from ._array import Array
+from ._integers import Short, UShort, Int, UInt, Long, ULong, LongLong, ULongLong
 
